@@ -1,0 +1,21 @@
+{
+  "name": "minecraft-mcp",
+  "owner": {
+    "name": "tomda",
+    "url": "https://github.com/kitoutou999"
+  },
+  "description": "Pont entre Claude et un client Minecraft : captures, cadrage automatique, inventaires, references visuelles.",
+  "plugins": [
+    {
+      "name": "mcbridge",
+      "source": "./plugins/mcbridge",
+      "displayName": "Minecraft Bridge",
+      "description": "Donne a Claude les yeux d'un joueur Minecraft : captures, isolation d'un sujet sur fond uni, cadrage automatique d'une entite, lecture des inventaires et des lores, detection des regressions visuelles. Necessite le mod Fabric mcbridge dans un client Minecraft 26.1.2.",
+      "category": "development",
+      "keywords": ["minecraft", "fabric", "screenshot", "resource-pack", "visual-testing"],
+      "license": "MIT",
+      "repository": "https://github.com/kitoutou999/Minecraft-MCP",
+      "homepage": "https://github.com/kitoutou999/Minecraft-MCP#readme"
+    }
+  ]
+}

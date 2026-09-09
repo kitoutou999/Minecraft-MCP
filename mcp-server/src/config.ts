@@ -91,8 +91,9 @@ function readTokenFromFile(path: string): string | undefined {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
-  const bridgeUrl = (env.MCBRIDGE_URL ?? "http://127.0.0.1:25580").replace(/\/+$/, "");
-  const transport = (env.MCBRIDGE_TRANSPORT ?? "stdio").toLowerCase();
+  // `||` et non `??` : une option de plugin non renseignee arrive comme chaine vide.
+  const bridgeUrl = (env.MCBRIDGE_URL || "http://127.0.0.1:25580").replace(/\/+$/, "");
+  const transport = (env.MCBRIDGE_TRANSPORT || "stdio").toLowerCase();
   if (transport !== "stdio" && transport !== "http") {
     throw new Error(`MCBRIDGE_TRANSPORT doit valoir "stdio" ou "http", recu "${transport}"`);
   }

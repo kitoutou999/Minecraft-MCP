@@ -14,6 +14,11 @@ mod/.idea/
 mcp-server/node_modules/
 mcp-server/dist/
 
+# Le plugin embarque deux artefacts generes, volontairement versionnes : un plugin Claude Code est
+# copie tel quel, sans etape de build ni npm install. scripts/build-plugin.sh les reconstruit.
+!plugins/mcbridge/server/mcbridge-mcp.mjs
+!plugins/mcbridge/mod/*.jar
+
 # Divers
 .DS_Store
 *.log

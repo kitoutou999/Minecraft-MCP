@@ -1,0 +1,34 @@
+{
+  "name": "mcbridge",
+  "displayName": "Minecraft Bridge",
+  "version": "0.1.0",
+  "description": "Donne a Claude les yeux d'un joueur Minecraft : captures, cadrage automatique d'une entite sur fond uni, lecture des inventaires et des lores, planches d'animation, detection des regressions visuelles apres un changement de pack.",
+  "author": {
+    "name": "tomda",
+    "url": "https://github.com/kitoutou999"
+  },
+  "homepage": "https://github.com/kitoutou999/Minecraft-MCP#readme",
+  "repository": "https://github.com/kitoutou999/Minecraft-MCP",
+  "license": "MIT",
+  "keywords": ["minecraft", "fabric", "screenshot", "resource-pack", "visual-testing"],
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "userConfig": {
+    "config_path": {
+      "type": "string",
+      "title": "Fichier de configuration du mod",
+      "description": "Chemin vers config/mcbridge.json du client Minecraft. A laisser vide : le serveur le trouve seul dans .minecraft, les profils Modrinth App et les instances Prism."
+    },
+    "bridge_url": {
+      "type": "string",
+      "title": "Adresse du pont",
+      "description": "A laisser vide sauf si le client tourne sur une autre machine. Par defaut http://127.0.0.1:25580."
+    },
+    "token": {
+      "type": "string",
+      "title": "Jeton du pont",
+      "description": "A laisser vide sauf client distant : le jeton est lu dans la configuration du mod.",
+      "sensitive": true
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mcbridge": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/mcbridge-mcp.mjs"],
+      "env": {
+        "MCBRIDGE_CONFIG": "${user_config.config_path}",
+        "MCBRIDGE_URL": "${user_config.bridge_url}",
+        "MCBRIDGE_TOKEN": "${user_config.token}"
+      }
+    }
+  }
+}

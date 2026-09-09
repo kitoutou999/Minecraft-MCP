@@ -43,6 +43,20 @@ répond « bridge injoignable ».
 
 ## Installation
 
+### Le plus simple : le plugin Claude Code
+
+```
+/plugin marketplace add kitoutou999/Minecraft-MCP
+/plugin install mcbridge@minecraft-mcp
+```
+
+Le plugin embarque le serveur MCP en un fichier unique, sans dépendance à installer, et le jar du
+mod. Il reste à copier ce jar dans le dossier `mods` de l'instance Minecraft, puis à lancer le jeu
+une fois. Claude charge tout seul la marche à suivre en cas de problème.
+
+Les trois sections suivantes décrivent l'installation depuis les sources, pour développer sur le
+projet ou pour un cas particulier.
+
 ### 1. Le mod, dans le client
 
 ```bash
@@ -180,8 +194,10 @@ actif, ciel et brouillard lui appartiennent, donc désactivez les shaders pour l
 ```
 mod/          mod Fabric client (Java 25)
 mcp-server/   serveur MCP TypeScript, catalogue dans src/tools.ts
+plugins/      plugin Claude Code, avec le serveur regroupé et le jar du mod
+.claude-plugin/  déclaration du dépôt comme marketplace
 docs/         architecture, protocole, référence des outils, feuille de route
-scripts/      appel direct du pont, capture, génération de la documentation
+scripts/      appel direct du pont, capture, génération de la documentation et du plugin
 examples/     configuration pour Claude Desktop
 CLAUDE.md     consignes pour les IA qui font évoluer ce dépôt
 ```
