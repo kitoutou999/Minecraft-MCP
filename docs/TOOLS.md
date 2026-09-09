@@ -65,11 +65,13 @@ Oriente la vue du joueur vers un point du monde (calcule yaw/pitch depuis la pos
 
 Methode RPC `vision.screenshot`, lecture, renvoie une image.
 
-Capture le rendu du client et renvoie une image (JPEG par defaut, redimensionnee a maxWidth). Options : teleport {x,y,z,yaw?,pitch?} envoie /tp @s avant la capture (necessite les permissions sur le serveur) ; look {yaw,pitch} oriente la vue ; hideHud (defaut true) masque l'interface ; waitTicks (defaut 2, ou 10 apres teleport) laisse le temps aux chunks et modeles de charger, 20 ticks = 1 s. Le HUD est restaure apres la capture. Un ecran ouvert (chat, menu Echap, inventaire) est masque par defaut le temps de la capture sans etre ferme (hideScreen) ; la reponse indique screenOpen et screenHidden. Utiliser format 'png' et maxWidth 0 pour une image fidele en pleine resolution (couteuse en tokens).
+Capture le rendu du client et renvoie une image (JPEG par defaut, redimensionnee a maxWidth). Options : teleport {x,y,z,yaw?,pitch?} deplace le joueur avant la capture, en spectateur par defaut pour qu'il ne tombe pas ; look {yaw,pitch} oriente la vue ; hideHud (defaut true) masque l'interface ; waitTicks (defaut 2, ou 10 apres teleport) laisse le temps aux chunks et modeles de charger, 20 ticks = 1 s. Le HUD est restaure apres la capture. Un ecran ouvert (chat, menu Echap, inventaire) est masque par defaut le temps de la capture sans etre ferme (hideScreen) ; la reponse indique screenOpen et screenHidden. Utiliser format 'png' et maxWidth 0 pour une image fidele en pleine resolution (couteuse en tokens).
 
 | Parametre | Type | Requis | Defaut | Description |
 |---|---|---|---|---|
-| `teleport` | {x, y, z, yaw, pitch} | non |  | Teleporter le joueur avant la capture (commande /tp @s). |
+| `teleport` | {x, y, z, yaw, pitch} | non |  | Deplacer le joueur avant la capture. Les coordonnees designent ses pieds, comme une commande de teleportation. |
+| `stabilize` | boolean | non | true | Passer en spectateur avant de deplacer le joueur, pour qu'il ne tombe pas si la position est en l'air, et pour qu'aucune collision ni modele de joueur ne gene la capture. Sans lui, une position en hauteur fait chuter un joueur en survie. Le mode precedent n'est rendu que si returnToStart est vrai : le rendre en plein vol ferait tomber le joueur. |
+| `returnToStart` | boolean | non | false | Revenir a la position et au mode de jeu du depart apres la capture. Sinon le joueur reste sur place. |
 | `look` | {yaw, pitch} | non |  | Orienter la vue avant la capture. |
 | `hideHud` | boolean | non | true | Masquer le HUD pendant la capture. |
 | `hideScreen` | boolean | non | true | Ne pas dessiner l'ecran ouvert (chat, menu Echap, inventaire, menu serveur) pendant la capture, sans le fermer ni rendre la souris au jeu. |

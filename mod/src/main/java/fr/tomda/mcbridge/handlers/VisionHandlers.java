@@ -14,6 +14,7 @@ import fr.tomda.mcbridge.util.ClientMc;
 import fr.tomda.mcbridge.util.Commands;
 import fr.tomda.mcbridge.util.EntityJson;
 import fr.tomda.mcbridge.util.Images;
+import fr.tomda.mcbridge.util.Spectator;
 import fr.tomda.mcbridge.util.TickWaiter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
@@ -224,6 +225,9 @@ public final class VisionHandlers {
 		boolean hideHud = ctx.optBoolean("hideHud", true);
 		boolean hideScreen = ctx.optBoolean("hideScreen", true);
 		boolean closeScreen = ctx.optBoolean("closeScreen", false);
+		// Sans cela, une capture demandee en l'air fait tomber un joueur en survie, avec les degats.
+		boolean stabilize = ctx.optBoolean("stabilize", true);
+		boolean returnToStart = ctx.optBoolean("returnToStart", false);
 		int maxWidth = ctx.optInt("maxWidth", cfg.screenshot.defaultMaxWidth);
 		String format = ctx.optString("format", cfg.screenshot.defaultFormat).toLowerCase(Locale.ROOT);
 		double quality = ctx.optDouble("quality", cfg.screenshot.jpegQuality);
@@ -236,15 +240,31 @@ public final class VisionHandlers {
 			throw RpcException.unavailable("La teleportation passe par une commande et enableCommands=false.");
 		}
 
-		// Deplacement et orientation avant la capture.
+		// Deplacement avant la capture. Le spectateur evite la chute, et permet au passage de placer
+		// la camera sans envoyer la moindre commande.
+		Spectator.Guard guard = null;
+		Vec3 startPos = null;
+		float startYaw = 0;
+		float startPitch = 0;
 		if (teleport != null) {
-			String cmd = String.format(Locale.ROOT, "%s @s %.3f %.3f %.3f", cfg.teleportCommand,
-					teleport.get("x").getAsDouble(), teleport.get("y").getAsDouble(), teleport.get("z").getAsDouble());
-			if (teleport.has("yaw") && teleport.has("pitch")) {
-				cmd += String.format(Locale.ROOT, " %.2f %.2f",
-						teleport.get("yaw").getAsDouble(), teleport.get("pitch").getAsDouble());
-			}
-			Commands.send(cmd);
+			Object[] before = ClientMc.call(() -> {
+				LocalPlayer p = ClientMc.player();
+				return new Object[]{p.position(), p.getYRot(), p.getXRot()};
+			});
+			startPos = (Vec3) before[0];
+			startYaw = (float) before[1];
+			startPitch = (float) before[2];
+
+			if (stabilize) guard = Spectator.enter();
+
+			double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
+			float tpYaw = teleport.has("yaw") ? teleport.get("yaw").getAsFloat() : startYaw;
+			float tpPitch = teleport.has("pitch") ? teleport.get("pitch").getAsFloat() : startPitch;
+			// Le parametre designe les pieds du joueur, comme une commande de teleportation.
+			Vec3 eye = new Vec3(teleport.get("x").getAsDouble(),
+					teleport.get("y").getAsDouble() + eyeHeight,
+					teleport.get("z").getAsDouble());
+			Commands.moveCamera(eye, tpYaw, tpPitch);
 		}
 		String[] screenOpen = new String[1];
 		ClientMc.call(() -> {
@@ -262,19 +282,46 @@ public final class VisionHandlers {
 		byte[] png = captureRawPng(cfg, mc, hideHud, hideScreen, waitTicks);
 		JsonObject image = Images.encode(png, maxWidth, format, quality);
 
-		final boolean hidden = hideScreen;
-		JsonObject meta = ClientMc.call(() -> {
+		// Position relevee ici, avant un eventuel retour au point de depart : sinon la reponse
+		// annoncerait l'endroit ou le joueur a ete ramene, et non celui d'ou la vue a ete prise.
+		Object[] shot = ClientMc.call(() -> {
 			LocalPlayer p = ClientMc.player();
-			JsonObject m = new JsonObject();
-			m.add("playerPos", Json.vec(p.position()));
-			m.addProperty("yaw", p.getYRot());
-			m.addProperty("pitch", p.getXRot());
-			m.addProperty("tick", TickWaiter.currentTick());
-			m.addProperty("hudHidden", hideHud);
-			m.addProperty("screenOpen", screenOpen[0]);
-			m.addProperty("screenHidden", screenOpen[0] != null && hidden);
-			return m;
+			return new Object[]{p.position(), p.getYRot(), p.getXRot(),
+					mc.gameMode != null ? mc.gameMode.getPlayerMode().getSerializedName() : "unknown"};
 		});
+        final Vec3 shotPos = (Vec3) shot[0];
+        final float shotYaw = (float) shot[1];
+        final float shotPitch = (float) shot[2];
+        final String shotMode = (String) shot[3];
+
+		// Retour au point de depart si demande. Sinon le joueur reste sur place, et reste en
+		// spectateur quand il a fallu l'y mettre : le remettre en survie en l'air le ferait tomber,
+		// ce que ce garde-fou existe justement pour eviter.
+		boolean returned = false;
+		if (teleport != null && returnToStart) {
+			double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
+			Commands.moveCamera(startPos.add(0, eyeHeight, 0), startYaw, startPitch);
+			Spectator.restore(guard);
+			returned = true;
+		}
+
+		final boolean hidden = hideScreen;
+		final Spectator.Guard finalGuard = guard;
+		final boolean finalReturned = returned;
+		JsonObject meta = new JsonObject();
+		meta.add("playerPos", Json.vec(shotPos));
+		meta.addProperty("yaw", shotYaw);
+		meta.addProperty("pitch", shotPitch);
+		meta.addProperty("gameMode", shotMode);
+		meta.addProperty("tick", TickWaiter.currentTick());
+		meta.addProperty("hudHidden", hideHud);
+		meta.addProperty("screenOpen", screenOpen[0]);
+		meta.addProperty("screenHidden", screenOpen[0] != null && hidden);
+		if (finalGuard != null && finalGuard.changed()) {
+			meta.addProperty("switchedToSpectator", true);
+			meta.addProperty("previousGameMode", finalGuard.previousMode());
+		}
+		if (teleport != null) meta.addProperty("returnedToStart", finalReturned);
 		image.add("capture", meta);
 		return image;
 	}

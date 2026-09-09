@@ -10,12 +10,27 @@ tourner dans un client Minecraft connecte. Sans lui, chaque appel repond « brid
 
 ## Installer le mod
 
+La commande `/mcbridge-install` fait tout cela pas a pas. A la main :
+
 1. Minecraft **26.1.2**, avec **Fabric Loader 0.19.3** ou plus et **Fabric API**.
-2. Copier `mod/mcbridge-0.1.0.jar` (fourni avec ce plugin) dans le dossier `mods` de l'instance.
-   Pour un lanceur a profils, c'est le dossier `mods` du profil, pas `~/.minecraft/mods`.
-3. Lancer Minecraft une fois. Le mod cree `config/mcbridge.json` a cote et ecrit dans le journal :
+2. Le jar est livre avec le plugin. Le retrouver :
+
+   ```bash
+   ls ~/.claude/plugins/cache/*/mcbridge/*/mod/*.jar
+   ```
+
+3. Le copier dans le dossier `mods` de l'instance. **Pour un lanceur a profils, c'est le dossier
+   `mods` du profil**, pas `~/.minecraft/mods` :
+
+   ```bash
+   ls -d ~/.minecraft/mods ~/.local/share/ModrinthApp/profiles/*/mods \
+         ~/snap/modrinth/common/.local/share/ModrinthApp/profiles/*/mods \
+         ~/.local/share/PrismLauncher/instances/*/minecraft/mods 2>/dev/null
+   ```
+
+4. Lancer Minecraft une fois. Le mod cree `config/mcbridge.json` a cote et ecrit dans le journal :
    `[mcbridge] pret : bridge http://127.0.0.1:25580`.
-4. Rejoindre un monde ou un serveur. Le pont ne repond pleinement que joueur en jeu.
+5. Rejoindre un monde ou un serveur. Le pont ne repond pleinement que joueur en jeu.
 
 Verification : `get_status` doit renvoyer la version du mod et `inWorld: true`.
 

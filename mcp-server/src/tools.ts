@@ -113,7 +113,7 @@ export const TOOLS: ToolDef[] = [
     title: "Capturer l'ecran",
     description:
       "Capture le rendu du client et renvoie une image (JPEG par defaut, redimensionnee a maxWidth). " +
-      "Options : teleport {x,y,z,yaw?,pitch?} envoie /tp @s avant la capture (necessite les permissions sur le serveur) ; " +
+      "Options : teleport {x,y,z,yaw?,pitch?} deplace le joueur avant la capture, en spectateur par defaut pour qu'il ne tombe pas ; " +
       "look {yaw,pitch} oriente la vue ; hideHud (defaut true) masque l'interface ; waitTicks (defaut 2, ou 10 apres teleport) " +
       "laisse le temps aux chunks et modeles de charger, 20 ticks = 1 s. Le HUD est restaure apres la capture. " +
       "Un ecran ouvert (chat, menu Echap, inventaire) est masque par defaut le temps de la capture sans etre ferme (hideScreen) ; la reponse indique screenOpen et screenHidden. " +
@@ -122,7 +122,21 @@ export const TOOLS: ToolDef[] = [
       teleport: z
         .object({ ...vec3(), yaw: z.number().optional(), pitch: z.number().optional() })
         .optional()
-        .describe("Teleporter le joueur avant la capture (commande /tp @s)."),
+        .describe("Deplacer le joueur avant la capture. Les coordonnees designent ses pieds, comme une commande de teleportation."),
+      stabilize: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe(
+          "Passer en spectateur avant de deplacer le joueur, pour qu'il ne tombe pas si la position est en l'air, et pour qu'aucune " +
+            "collision ni modele de joueur ne gene la capture. Sans lui, une position en hauteur fait chuter un joueur en survie. " +
+            "Le mode precedent n'est rendu que si returnToStart est vrai : le rendre en plein vol ferait tomber le joueur.",
+        ),
+      returnToStart: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("Revenir a la position et au mode de jeu du depart apres la capture. Sinon le joueur reste sur place."),
       look: z
         .object({ yaw: z.number().optional(), pitch: z.number().optional() })
         .optional()

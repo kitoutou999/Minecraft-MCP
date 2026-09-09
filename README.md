@@ -51,8 +51,14 @@ répond « bridge injoignable ».
 ```
 
 Le plugin embarque le serveur MCP en un fichier unique, sans dépendance à installer, et le jar du
-mod. Il reste à copier ce jar dans le dossier `mods` de l'instance Minecraft, puis à lancer le jeu
-une fois. Claude charge tout seul la marche à suivre en cas de problème.
+mod. Pour la suite, demandez à Claude :
+
+```
+/mcbridge-install
+```
+
+Il trouve le jar, repère vos instances Minecraft, copie le mod dans celle que vous choisissez et
+vérifie que le pont répond. En cas de problème, il charge tout seul la marche à suivre.
 
 Les trois sections suivantes décrivent l'installation depuis les sources, pour développer sur le
 projet ou pour un cas particulier.

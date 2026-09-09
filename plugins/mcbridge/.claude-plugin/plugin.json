@@ -10,7 +10,13 @@
   "homepage": "https://github.com/kitoutou999/Minecraft-MCP#readme",
   "repository": "https://github.com/kitoutou999/Minecraft-MCP",
   "license": "MIT",
-  "keywords": ["minecraft", "fabric", "screenshot", "resource-pack", "visual-testing"],
+  "keywords": [
+    "minecraft",
+    "fabric",
+    "screenshot",
+    "resource-pack",
+    "visual-testing"
+  ],
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "userConfig": {
@@ -30,5 +36,6 @@
       "description": "A laisser vide sauf client distant : le jeton est lu dans la configuration du mod.",
       "sensitive": true
     }
-  }
+  },
+  "commands": "./commands/"
 }

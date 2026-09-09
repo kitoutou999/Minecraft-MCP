@@ -122,6 +122,10 @@ Renommages connus vers 26.2 : `Minecraft.getMainRenderTarget()` devient
   joueur, mode de jeu courant) plutot que supposer que la commande a abouti.
 - `/tp` place les **pieds** du joueur ; la camera est a hauteur des yeux (1,62 bloc debout). Toute
   position de camera calculee doit soustraire `player.getEyeHeight()` avant la teleportation.
+- **Deplacer un joueur en survie vers une position en l'air le fait tomber**, avec les degats. Tout
+  outil qui deplace le joueur passe donc par `util/Spectator.enter()` avant, et ne rend le mode
+  precedent que s'il le ramene au sol. Le vol en creatif ne convient pas : le joueur resterait
+  visible des autres et garderait ses collisions, donc une camera dans un mur ne marcherait pas.
 - `Screenshot.takeScreenshot` lit la frame precedente : attendre au moins un tick apres avoir
   change `hideGui` ou l'orientation (fait par `VisionHandlers`).
 - F1 (`hideGui`) ne masque pas un ecran ouvert, et l'ecran de chat dessine lui-meme l'historique.

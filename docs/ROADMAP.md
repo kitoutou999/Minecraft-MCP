@@ -249,6 +249,22 @@ scene tombe de 0,24 % a 0,0055 % quand la recette isole son sujet, soit un facte
 le seuil de 0,5 % tres au-dessus du bruit. Le raccourci `studio:true` allume bien les sept options,
 et un rendu de PNJ ne laisse plus aucun element de decor.
 
+## Correctif : chute apres une teleportation (implemente, a valider en jeu)
+
+Signale par l'utilisateur : une capture demandee a une position en hauteur faisait tomber le joueur.
+`studio.frameTarget` et `refs` passaient deja en spectateur, mais `vision.screenshot` teleportait
+sans garde-fou, avec les degats de chute a l'arrivee.
+
+`util/Spectator` regroupe le passage en spectateur et sa restauration, avec verification que le
+serveur a suivi. `vision.screenshot` l'utilise quand un deplacement est demande (`stabilize`, actif
+par defaut), et ne rend le mode precedent que si `returnToStart` est vrai : le rendre en plein vol
+ferait tomber le joueur, ce que le garde-fou existe pour eviter.
+
+Le vol en creatif a ete ecarte : le joueur resterait visible des autres joueurs et garderait ses
+collisions, donc une camera placee dans un mur ne fonctionnerait pas. Le spectateur supprime en plus
+le modele du joueur de l'image et evite la commande de teleportation, le serveur acceptant la
+position annoncee par un spectateur.
+
 ## Lot 4 : rendu hors ecran
 
 Reproduire le mecanisme vanilla qui dessine le joueur dans l'inventaire :
