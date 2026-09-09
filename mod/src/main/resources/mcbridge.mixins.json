@@ -1,0 +1,25 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "fr.tomda.mcbridge.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"AbstractContainerScreenAccessor",
+		"CameraMixin",
+		"ChunkSectionsToRenderMixin",
+		"EntityRenderDispatcherMixin",
+		"FogRendererMixin",
+		"LevelRendererMixin",
+		"MouseHandlerMixin",
+		"ParticleEngineMixin",
+		"RenderSectionRegionMixin",
+		"ScreenEffectRendererMixin",
+		"ScreenMixin",
+		"compat.SodiumLevelSliceMixin",
+		"compat.SodiumWorldRendererMixin",
+		"compat.VoxyRenderSystemMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

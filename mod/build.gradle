@@ -1,0 +1,79 @@
+// Build du mod client "mcbridge" (Fabric, Minecraft 26.1.2, Java 25).
+// Configuration alignee sur ModelRecorder (meme machine, meme toolchain) : Minecraft 26.x est
+// non obfusque, donc pas de mappings ni de modImplementation, les dependances sont en
+// `implementation` classique.
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	// Loom ajoute automatiquement les depots Minecraft et Fabric.
+}
+
+loom {
+	// Mod client uniquement : un seul source set (src/main), pas de split client/common.
+	mods {
+		"mcbridge" {
+			sourceSet sourceSets.main
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+	def props = [
+		"version"          : project.version,
+		"minecraft_version": project.minecraft_version,
+		"loader_version"   : project.loader_version
+	]
+	inputs.properties props
+
+	filesMatching("fabric.mod.json") {
+		expand props
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = "UTF-8"
+	it.options.compilerArgs << "-Xlint:deprecation"
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+	from("../LICENSE") {
+		rename { "${it}_mcbridge" }
+	}
+}
+
+// `./gradlew installMod` copie le jar dans le dossier mods du client local.
+// Destination, par priorite : -PmodsDir=/chemin/vers/mods, puis la variable d'environnement
+// MCBRIDGE_MODS_DIR, puis ~/.minecraft/mods. Exemple Modrinth App (snap) :
+//   MCBRIDGE_MODS_DIR=~/snap/modrinth/common/.local/share/ModrinthApp/profiles/Clicker/mods ./gradlew installMod
+tasks.register('installMod', Copy) {
+	group = 'mcbridge'
+	description = 'Copie le jar compile dans le dossier mods du client Minecraft local'
+	dependsOn 'remapJar', 'jar'
+	def modsDir = project.findProperty('modsDir') ?: System.getenv('MCBRIDGE_MODS_DIR') ?: "${System.getProperty('user.home')}/.minecraft/mods"
+	from(layout.buildDirectory.dir('libs')) {
+		include "${project.archives_base_name}-${project.version}.jar"
+	}
+	into modsDir
+}

@@ -1,0 +1,32 @@
+{
+  "name": "mcbridge-mcp-server",
+  "version": "0.1.0",
+  "description": "Serveur MCP (stdio) qui expose le mod client Minecraft 'mcbridge' sous forme de tools : screenshots, camera, focus, options client, reflexion.",
+  "type": "module",
+  "bin": {
+    "mcbridge-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "dev": "node --experimental-strip-types --watch src/index.ts",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

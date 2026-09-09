@@ -1,0 +1,32 @@
+{
+	"schemaVersion": 1,
+	"id": "mcbridge",
+	"version": "${version}",
+	"name": "Minecraft MCP Bridge",
+	"description": "Pont HTTP local entre le client Minecraft et un serveur MCP : screenshots, camera, focus, options client, reflexion. Concu pour etre pilote par une IA.",
+	"authors": [
+		"tomda"
+	],
+	"contact": {
+		"sources": "https://github.com/tomda/Minecraft-MCP"
+	},
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"fr.tomda.mcbridge.McBridgeMod"
+		]
+	},
+	"mixins": [
+		{
+			"config": "mcbridge.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

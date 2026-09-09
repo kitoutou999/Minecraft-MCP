@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mcbridge": {
+      "command": "node",
+      "args": ["/chemin/absolu/vers/Minecraft-MCP/mcp-server/dist/index.js"],
+      "env": {
+        "MCBRIDGE_URL": "http://127.0.0.1:25580",
+        "MCBRIDGE_CONFIG": "/home/utilisateur/.minecraft/config/mcbridge.json"
+      }
+    }
+  }
+}

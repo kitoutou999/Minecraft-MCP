@@ -1,0 +1,19 @@
+# Depots de reference clones pour analyse (mcpfabric, minecraft-mcp) : pas versionnes
+reference/
+
+# Gradle / Java
+mod/.gradle/
+mod/build/
+mod/run/
+mod/bin/
+mod/.idea/
+*.iml
+*.class
+
+# Node
+mcp-server/node_modules/
+mcp-server/dist/
+
+# Divers
+.DS_Store
+*.log
