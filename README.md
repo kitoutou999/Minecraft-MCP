@@ -1,209 +1,199 @@
-# Minecraft MCP Bridge (mcbridge)
+# mcbridge : un pont entre Claude et un client Minecraft
 
-Pont entre Claude (ou tout client MCP) et un **client Minecraft** : screenshots, camera, isolation
-d'entites au rendu, options client, rechargement du pack, lecture des logs, reflexion Java.
+Donne à une IA les yeux et les mains d'un joueur Minecraft, pour qu'elle vérifie elle-même ce
+qu'elle développe : se placer, cadrer, capturer, lire un menu, comparer, corriger.
 
-Le but est de laisser une IA **verifier visuellement** ce qu'elle a developpe sur un serveur
-(modeles ModelEngine, meubles Nexo, HUD, shaders) sans intervention humaine : se placer, cadrer,
-capturer, corriger.
-
-Le mod ne pilote que le client. Le serveur de jeu se pilote par commandes envoyees en tant que
-joueur (`send_command`) ou par RCON en dehors de ce projet.
+Là où les autres ponts Minecraft pilotent un bot sans écran, celui-ci passe par un **mod client**.
+Il voit donc exactement ce que voit le joueur, shaders compris, et peut photographier un modèle
+isolé sur fond uni comme dans un studio.
 
 ```
-Claude Code / client MCP
-        |  MCP (stdio)
-  mcp-server  (Node 20, TypeScript)          mcp-server/
-        |  HTTP  POST /rpc  + GET /events (SSE), jeton bearer, 127.0.0.1 uniquement
-  mod Fabric "mcbridge"  (client Minecraft)   mod/
-        |  tout acces au jeu passe par le thread de rendu
-  info  player  camera  vision  world  chat  events  client  resources  logs  game  focus  reflect
+Claude Code, Claude Desktop, ou tout client MCP
+        │  MCP (stdio ou HTTP)
+   serveur MCP  (Node 20, TypeScript)                    mcp-server/
+        │  HTTP local, jeton bearer, 127.0.0.1 uniquement
+   mod Fabric « mcbridge »  (dans le client Minecraft)   mod/
+        │  tout accès au jeu passe par le fil de rendu
+   vision · focus · studio · interfaces · références · monde · réflexion
 ```
 
-## Prerequis
+## Ce que ça permet
 
-| Outil | Version |
+| Situation | Ce que l'IA peut faire seule |
 |---|---|
-| Minecraft | 26.1.2 avec Fabric Loader 0.19.3+ et Fabric API |
-| JDK | 25 (Minecraft 26.x est compile en Java 25) |
-| Node.js | 20 ou plus recent |
-| Gradle | wrapper fourni (9.5.1), rien a installer |
+| Un modèle 3D vient d'être posé en jeu | Le photographier isolé sur fond uni, sous plusieurs angles, cadrage calculé |
+| Un lore ne rend pas comme prévu | Lire son texte exact, segment par segment, avec la couleur et le style de chacun |
+| Un menu de plugin a dix pages | Les parcourir en cliquant, et lire chaque page |
+| Une animation doit être jugée | Recevoir une planche de vues successives plutôt qu'une image figée |
+| Le pack de ressources vient de changer | Recharger, lire les erreurs du client, comparer à des images de référence |
+| Une texture est mal placée | Isoler la zone, masquer le décor, agrandir la case concernée |
+
+## Deux morceaux, et une dépendance
+
+Le mod et le serveur MCP vont ensemble. **Le serveur MCP seul ne sert à rien** : il ne fait que
+relayer vers le mod, qui doit tourner dans un client Minecraft connecté. Sans lui, chaque appel
+répond « bridge injoignable ».
+
+| Prérequis | Version |
+|---|---|
+| Minecraft | 26.1.2, avec Fabric Loader 0.19.3 ou plus et Fabric API |
+| JDK | 25, pour compiler le mod (Minecraft 26.x est compilé en Java 25) |
+| Node.js | 20 ou plus récent, pour le serveur MCP |
+| Gradle | le wrapper est fourni, rien à installer |
 
 ## Installation
 
+### 1. Le mod, dans le client
+
 ```bash
-# 1. Mod client
 cd mod
-./gradlew build            # -> build/libs/mcbridge-0.1.0.jar
-./gradlew installMod       # copie le jar dans ~/.minecraft/mods (-PmodsDir=... pour un autre dossier)
-
-# 2. Serveur MCP
-cd ../mcp-server
-npm ci
-npm run build              # -> dist/index.js
-npm run smoke              # verifie l'enregistrement des tools sans Minecraft
-
-# 3. Lancer Minecraft une fois : le mod cree ~/.minecraft/config/mcbridge.json avec un jeton.
-#    Le log affiche : [mcbridge] pret : bridge http://127.0.0.1:25580 (30 methodes), jeton dans ...
-
-# 4. Enregistrer le serveur MCP dans Claude Code (le jeton est lu directement dans la config du mod)
-claude mcp add mcbridge -e MCBRIDGE_CONFIG=$HOME/.minecraft/config/mcbridge.json -- node $(pwd)/dist/index.js
+./gradlew build        # produit build/libs/mcbridge-0.1.0.jar
+./gradlew installMod   # copie le jar dans ~/.minecraft/mods
 ```
 
-Ou via `.mcp.json` a la racine d'un projet, voir `examples/mcp.json`.
-
-### Avec Modrinth App (ou Prism)
-
-Chaque profil a son propre dossier de jeu : le jar va dans `<profil>/mods/` et le mod ecrit sa
-config dans `<profil>/config/mcbridge.json`. Le serveur MCP et les scripts cherchent ce fichier
-automatiquement dans `~/.minecraft`, les profils Modrinth App (installation classique ou snap
-`~/snap/modrinth/common/...`, Windows, macOS) et les instances Prism ; en cas de doute, donner le
-chemin explicitement avec `MCBRIDGE_CONFIG`.
+Pour un lanceur à profils, indiquez le dossier de mods du profil :
 
 ```bash
-# exemple : profil "Clicker" de Modrinth App installe en snap
-PROFIL=~/snap/modrinth/common/.local/share/ModrinthApp/profiles/Clicker
-MCBRIDGE_MODS_DIR=$PROFIL/mods ./gradlew installMod      # depuis mod/
-claude mcp add mcbridge -e MCBRIDGE_CONFIG=$PROFIL/config/mcbridge.json -- node /chemin/vers/mcp-server/dist/index.js
+PROFIL=~/.local/share/ModrinthApp/profiles/MonProfil
+MCBRIDGE_MODS_DIR=$PROFIL/mods ./gradlew installMod
 ```
 
-### Client sur une autre machine
+Lancez Minecraft une fois. Le mod crée `config/mcbridge.json` avec un jeton et affiche dans le
+journal l'adresse du pont, par exemple `[mcbridge] prêt : bridge http://127.0.0.1:25580`.
 
-Le bridge doit etre joignable depuis la machine qui execute Claude Code. Dans
-`config/mcbridge.json` du client : `"host": "0.0.0.0"` et `"allowRemote": true`, ouvrir le port
-25580 sur le pare-feu, puis cote MCP : `MCBRIDGE_URL=http://<ip du client>:25580` et
-`MCBRIDGE_TOKEN=<jeton copie depuis le fichier>`. Le jeton reste obligatoire.
+### 2. Le serveur MCP
 
-### Compatibilite avec les autres mods
+```bash
+cd mcp-server
+npm ci
+npm run build
+npm run smoke     # vérifie l'enregistrement des outils, sans Minecraft
+```
 
-Teste avec un profil contenant Fabric API, Sodium, Iris, Voxy, Litematica, ModelRecorder. Le
-focus d'entites agit avant le rendu et ne depend pas du moteur de terrain. Le masquage du terrain
-coupe le point commun a vanilla et Sodium, et un mixin optionnel coupe les LOD de Voxy. Iris sans
-shader pack se comporte comme vanilla ; avec un pack actif, ciel et brouillard sont geres par le
-pack : desactiver les shaders pour le mode studio. Detail dans `docs/ROADMAP.md`.
+### 3. Le brancher à Claude Code
 
-## Utilisation
+Le jeton est lu directement dans la configuration du mod, rien à recopier :
 
-Photographier un modele, depuis Claude :
+```bash
+claude mcp add mcbridge -s user \
+  -e MCBRIDGE_CONFIG=$HOME/.minecraft/config/mcbridge.json \
+  -- node $PWD/dist/index.js
+```
 
-1. `list_entities` avec `types: ["item_display"]` ou `describe_scene` : trouver la cible.
-2. `frame_target` avec son UUID : cadrage, placement, fond uni, capture, restauration, en un appel.
+Le serveur MCP retrouve seul la configuration dans `~/.minecraft`, dans les profils de Modrinth App
+(y compris l'installation snap) et dans les instances de Prism. La variable n'est utile que si la
+découverte échoue ou si plusieurs profils coexistent.
 
-Le meme resultat a la main, quand il faut controler chaque etape :
+Pour Claude Desktop, voir `examples/mcp.json`.
 
-1. `send_command` `gamemode spectator` puis `send_command` `tp @s 120 75 -40` : se placer.
-2. `focus_entities` avec l'UUID de la cible, `focus_scene` pour le fond uni.
-3. `look_at` le centre de la cible, puis `screenshot`.
-4. `focus_clear`.
+### Le client sur une autre machine
 
-Apres une modification du pack : `reload_resource_pack`, puis `get_client_log` avec
-`levels: ["ERROR","WARN"]`, puis `compare_all_references` pour savoir ce qui a change visuellement.
+Dans `config/mcbridge.json` du client, mettre `host` à `0.0.0.0` et `allowRemote` à vrai, ouvrir le
+port, puis côté MCP donner `MCBRIDGE_URL=http://<adresse du client>:25580` et `MCBRIDGE_TOKEN`. Le
+jeton reste obligatoire.
 
-Verifier une animation plutot qu'une pose : se placer, `focus_scene` pour isoler le sujet, puis
-`capture_animation`, qui renvoie une planche de vues successives.
+## Les 48 outils
 
-Surveiller les regressions visuelles :
-
-1. `save_reference` une fois sur chaque element a surveiller, avec un nom parlant, avant de toucher
-   au pack. Camera, options de scene et sujet isole sont memorises avec l'image. Isoler le sujet
-   (`focus`) et masquer le decor (`scene`) evite qu'un joueur de passage fasse diverger la mesure.
-2. Apres une modification, `compare_all_references` : un verdict chiffre par reference, sans image.
-3. `compare_reference` sur celles qui ont bouge, pour voir les differences en magenta.
-
-Les images et leurs recettes sont rangees dans `mcbridge-refs/` du dossier de jeu, donc versionnables.
-
-Verifier un objet et son lore :
-
-1. `open_inventory` pour l'inventaire du joueur, ou `send_command` la commande du menu du plugin.
-2. `get_gui` : numero de chaque case, objet contenu, position a l'ecran.
-3. `get_item_lore` : le texte exact de l'infobulle, ligne par ligne, avec couleurs et styles.
-4. `screenshot_gui` avec `crop: "slot"` pour la texture, ou `hoverSlot` et `crop: "tooltip"` pour le rendu du lore.
-5. `click_slot` pour changer de page ou entrer dans une categorie, puis reprendre a l'etape 2.
-
-Le clic est la seule action du mod qui modifie l'etat du serveur : il est desactive par defaut
-(`enableGuiClicks`), limite au clic simple et au clic rapide, et `dryRun` permet de verifier la
-case visee sans rien envoyer.
-
-### Tools disponibles (48 tools, 46 methodes RPC)
-
-| Groupe | Tools |
+| Groupe | Outils |
 |---|---|
-| Etat | `get_status`, `get_player` |
-| Camera | `get_camera`, `look`, `look_at` |
-| Vision | `screenshot`, `describe_scene` |
+| État | `get_status`, `get_player` |
+| Caméra | `get_camera`, `look`, `look_at` |
+| Vision | `screenshot`, `describe_scene`, `capture_animation` |
+| Focus | `focus_entities`, `focus_scene`, `focus_region`, `focus_clear`, `focus_status` |
+| Studio | `frame_target`, `studio_bounds` |
+| Interfaces | `get_gui`, `open_inventory`, `close_gui`, `get_item_lore`, `hover_slot`, `screenshot_gui`, `click_slot` |
+| Références | `save_reference`, `compare_reference`, `compare_all_references`, `list_references`, `delete_reference` |
 | Monde | `get_block`, `list_entities`, `get_entity` |
 | Chat et commandes | `send_command`, `send_chat`, `get_chat`, `poll_events` |
 | Client | `get_client_options`, `set_client_options`, `reload_resource_pack`, `get_client_log`, `wait_ticks` |
-| Focus | `focus_entities`, `focus_scene`, `focus_region`, `focus_clear`, `focus_status` |
-| Studio | `frame_target`, `studio_bounds` |
-| Animation | `capture_animation` |
-| References visuelles | `save_reference`, `compare_reference`, `compare_all_references`, `list_references`, `delete_reference` |
-| Interfaces | `get_gui`, `open_inventory`, `close_gui`, `get_item_lore`, `hover_slot`, `screenshot_gui`, `click_slot` |
-| Reflexion | `reflect_invoke`, `reflect_get_field`, `reflect_set_field`, `reflect_new_instance`, `get_class_info`, `var_get`, `var_list`, `var_delete`, `var_clear` |
+| Réflexion | `reflect_invoke`, `reflect_get_field`, `reflect_set_field`, `reflect_new_instance`, `get_class_info`, `var_get`, `var_list`, `var_delete`, `var_clear` |
 
-Reference complete avec les parametres : [docs/TOOLS.md](docs/TOOLS.md).
+Référence complète avec tous les paramètres : [docs/TOOLS.md](docs/TOOLS.md), fichier généré depuis
+le catalogue.
 
-### Tester sans MCP
+## Trois façons de s'en servir
 
-`scripts/rpc.sh` appelle directement le bridge (jeton lu dans la config du mod) :
+**Photographier une entité.** Un seul appel suffit : `frame_target` avec l'identifiant de la cible.
+Il mesure le sujet, passe en spectateur, se place, isole la cible sur fond uni avec un éclairage
+plein jour, corrige la distance en mesurant le sujet dans l'image, puis remet le mode de jeu, la
+position et les réglages en place.
+
+**Vérifier un objet et son lore.** `open_inventory` ou la commande du menu, puis `get_gui` pour
+repérer la case, `get_item_lore` pour le texte exact avec ses couleurs, et `screenshot_gui` si le
+rendu lui-même est en cause. `click_slot` change de page.
+
+**Surveiller les régressions visuelles.** `save_reference` une fois sur chaque élément à surveiller,
+avec son sujet isolé. Après une modification du pack, `compare_all_references` donne un verdict
+chiffré pour chacun, sans renvoyer d'image tant que rien n'a bougé.
+
+## Sans MCP
+
+Deux scripts appellent le pont directement, pratiques pour tester ou déboguer :
 
 ```bash
 scripts/rpc.sh info.status
 scripts/rpc.sh chat.send '{"message":"/time set noon"}'
-scripts/shot.sh /tmp/capture.jpg          # screenshot decode sur disque
+scripts/shot.sh /tmp/capture.jpg
 ```
 
-## Configuration du mod (`~/.minecraft/config/mcbridge.json`)
+## Configuration du mod
 
-| Cle | Defaut | Role |
+Fichier `config/mcbridge.json` du client.
+
+| Clé | Défaut | Rôle |
 |---|---|---|
-| `host`, `port` | `127.0.0.1`, `25580` | Adresse du bridge. Ne pas exposer : controle total du client. |
-| `token`, `requireAuth` | genere, `true` | Jeton bearer obligatoire. |
-| `allowRemote` | `false` | Refuse toute connexion non locale meme si `host` change. |
-| `callTimeoutMs` | `8000` | Attente max du thread de jeu par appel. |
-| `commandMinIntervalMs` | `1100` | Intervalle minimal entre deux commandes. Un serveur deconnecte pour spam au-dela d'une dizaine de commandes rapprochees. |
-| `preferClientTeleport` | `true` | En spectateur, deplacer la camera sans commande. Evite la quasi-totalite des envois pendant un cadrage ou une comparaison. |
-| `teleportCommand`, `gamemodeCommand` | `minecraft:tp`, `minecraft:gamemode` | Commandes vanilla envoyees par le mod. Le prefixe `minecraft:` contourne les plugins qui les redefinissent : EssentialsX rejette `@s` sur `/tp` et impose sa syntaxe sur `/gamemode`. |
-| `reloadTimeoutMs` | `90000` | Attente max d'un rechargement de ressources. |
-| `enableVision`, `enableCommands`, `enableClientOptions`, `enableFocus`, `enableReflection` | `true` | Portes de capacites. |
-| `enableGuiClicks` | `false` | Autorise `click_slot` a envoyer un vrai clic au serveur. Seule capacite qui modifie l'etat du serveur : a n'activer qu'en developpement. |
-| `allowedClickTypes` | `pickup`, `quick_move` | Types de clic autorises. Les autres deplacent ou jettent des objets. |
-| `screenshot.defaultMaxWidth` | `1280` | Largeur max renvoyee (0 = native). |
-| `screenshot.defaultFormat`, `screenshot.jpegQuality` | `jpeg`, `0.85` | Format par defaut. |
-| `screenshot.defaultWaitTicks` | `2` | Ticks attendus avant capture (10 apres une teleportation). |
-| `reflection.allowedPackages`, `reflection.blockedPackages` | voir fichier | Classes accessibles par reflexion. |
+| `host`, `port` | `127.0.0.1`, `25580` | Adresse du pont. Ne pas exposer sans comprendre le risque. |
+| `token`, `requireAuth` | généré, `true` | Jeton bearer obligatoire. |
+| `allowRemote` | `false` | Refuse toute connexion non locale, même si `host` change. |
+| `commandMinIntervalMs` | `1100` | Intervalle minimal entre deux commandes. Un serveur déconnecte pour spam au-delà d'une dizaine de commandes rapprochées. |
+| `preferClientTeleport` | `true` | En spectateur, déplacer la caméra sans commande. |
+| `teleportCommand`, `gamemodeCommand` | `minecraft:tp`, `minecraft:gamemode` | Forme qualifiée, pour contourner les plugins qui redéfinissent ces commandes. |
+| `enableVision`, `enableCommands`, `enableClientOptions`, `enableFocus`, `enableReflection` | `true` | Portes de capacités. |
+| `enableGuiClicks` | `false` | Autorise le clic dans un menu, seule action qui modifie l'état du serveur. |
+| `screenshot.*` | jpeg, 1280 px | Format et taille par défaut des captures. |
+| `reflection.*` | voir le fichier | Classes accessibles par réflexion. |
 
-Variables d'environnement du serveur MCP : `MCBRIDGE_URL`, `MCBRIDGE_TOKEN`, `MCBRIDGE_CONFIG`,
-`MCBRIDGE_TIMEOUT_MS`, `MCBRIDGE_TRANSPORT` (`stdio` ou `http`), `MCBRIDGE_HTTP_PORT`.
+## Sécurité
 
-## Securite
+Le pont écoute en local et exige un jeton comparé en temps constant. Il refuse les connexions non
+locales même si l'adresse d'écoute change.
 
-- Le bridge n'ecoute que sur l'interface locale et exige un jeton.
-- `send_command` agit avec les permissions du joueur connecte : sur un serveur partage, donner
-  a ce compte uniquement les permissions necessaires (LuckPerms).
-- La reflexion donne acces a tout le client Java. Les packages `java.lang.Runtime`,
-  `ProcessBuilder`, `System`, `java.io`, `java.nio.file`, `java.net` sont bloques par defaut.
-  Desactiver `enableReflection` si elle n'est pas necessaire.
+Le mod **observe et pilote le client**, il ne touche pas au serveur, à deux exceptions près,
+toutes deux explicites : les commandes envoyées en tant que joueur, avec les permissions de ce
+joueur, et le clic dans un menu, désactivé par défaut. Un clic part vraiment au serveur : dans une
+boutique, il achète.
 
-## Structure du depot
+La réflexion donne accès à tout le client Java. L'exécution de processus, l'accès aux fichiers et au
+réseau sont bloqués par défaut, et la capacité entière se désactive d'une ligne.
+
+## Compatibilité
+
+Développé et validé avec Fabric API, Sodium, Iris, Voxy, Litematica sur un serveur Paper 26.1.2
+avec Nexo, ModelEngine, MythicMobs, BetterHud et EssentialsX.
+
+Le masquage du terrain coupe le point commun à Minecraft et à Sodium, et un mixin optionnel coupe le
+terrain lointain de Voxy. Iris sans pack de shaders se comporte comme le jeu de base ; avec un pack
+actif, ciel et brouillard lui appartiennent, donc désactivez les shaders pour le mode studio.
+
+## Structure
 
 ```
-mod/          mod Fabric client (Java 25), voir docs/ARCHITECTURE.md
+mod/          mod Fabric client (Java 25)
 mcp-server/   serveur MCP TypeScript, catalogue dans src/tools.ts
-docs/         ARCHITECTURE, PROTOCOL, TOOLS (genere), ROADMAP
-scripts/      rpc.sh, shot.sh, gen-tools-doc.mjs
-examples/     mcp.json pour Claude Code
-reference/    depots analyses (mcpfabric, minecraft-mcp), ignores par git
-CLAUDE.md     consignes pour les IA qui font evoluer ce projet
+docs/         architecture, protocole, référence des outils, feuille de route
+scripts/      appel direct du pont, capture, génération de la documentation
+examples/     configuration pour Claude Desktop
+CLAUDE.md     consignes pour les IA qui font évoluer ce dépôt
 ```
 
 ## Feuille de route
 
-Le socle (ce depot) couvre la capture, la camera, le focus d'entites et la reflexion. Les lots
-suivants sont decrits dans [docs/ROADMAP.md](docs/ROADMAP.md) : masquage du terrain et du ciel,
-focus par zone, mode studio (fond uni, cadrage automatique), rendu hors ecran.
+Le socle, le focus, le studio, les interfaces, l'animation et les références sont faits et validés
+en jeu. La suite est décrite dans [docs/ROADMAP.md](docs/ROADMAP.md) : un vrai rendu hors écran, qui
+permettrait des images à résolution libre et à fond transparent sans déplacer le joueur.
 
 ## Licence
 
-MIT. Inspire de [mcpfabric](https://github.com/Etoryx/mcpfabric) et de
-[minecraft-mcp](https://github.com/InventivetalentDev/minecraft-mcp), tous deux sous MIT, voir `LICENSE`.
+MIT. Inspiré de [mcpfabric](https://github.com/Etoryx/mcpfabric) et de
+[minecraft-mcp](https://github.com/InventivetalentDev/minecraft-mcp), tous deux sous MIT, dont
+certaines idées de structure ont été reprises et adaptées. Détail dans `LICENSE`.
