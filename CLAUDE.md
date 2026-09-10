@@ -170,6 +170,13 @@ Renommages connus vers 26.2 : `Minecraft.getMainRenderTarget()` devient
 - Une entite ModelEngine est une entite de base invisible plus des `item_display` ; un meuble Nexo
   est un `item_display` plus une `interaction`. Le focus doit inclure les displays proches
   (`attachRadius`), sinon le modele disparait.
+- **L'orientation d'un modele n'est pas dans le yaw de l'entite** : la base ModelEngine reste a 0,
+  et les displays aussi. Elle est dans la rotation gauche de la transformation des displays
+  (`studio/Facing`, calibre en jeu : identite regarde le sud, une rotation de `a` degres autour de
+  +Y regarde vers le yaw `-a`, plus le yaw d'entite du display pour un meuble Nexo). Sur le serveur
+  de test, les passagers de la base d'un PNJ sont des displays fantomes en billboard `VERTICAL`
+  (ils suivent la camera, leur rotation ne dit rien) et le modele visible est porte par une seconde
+  base au meme endroit : d'ou le filtre sur le billboard et le repli sur les displays attaches.
 - `hideGui` (F1) ne masque **pas** l'ecran ouvert : les deux sont extraits separement par
   `GameRenderer.extractGui`. Une capture d'interface met donc `hideHud` a vrai et `hideScreen` a faux.
 - Les coordonnees d'interface sont en unites mises a l'echelle ; le framebuffer est en pixels

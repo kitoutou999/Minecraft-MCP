@@ -54,8 +54,8 @@ public final class StudioBounds {
 		HITBOX
 	}
 
-	public record Result(AABB box, Vec3 center, double radius, float targetYaw, List<Entity> parts,
-	                     List<Source> sources) {
+	public record Result(AABB box, Vec3 center, double radius, float targetYaw, String targetYawSource,
+	                     List<Entity> parts, List<Source> sources) {
 		public JsonObject toJson() {
 			JsonObject o = new JsonObject();
 			JsonObject b = new JsonObject();
@@ -66,6 +66,7 @@ public final class StudioBounds {
 			o.add("center", Json.vec(center));
 			o.addProperty("radius", radius);
 			o.addProperty("targetYaw", targetYaw);
+			o.addProperty("targetYawSource", targetYawSource);
 			JsonArray arr = new JsonArray();
 			for (int i = 0; i < parts.size(); i++) {
 				JsonObject p = EntityJson.summary(parts.get(i), center);
@@ -126,6 +127,53 @@ public final class StudioBounds {
 		double radius = 0.5 * Math.sqrt(box.getXsize() * box.getXsize()
 				+ box.getYsize() * box.getYsize()
 				+ box.getZsize() * box.getZsize()) * Math.max(0.5, margin);
-		return new Result(box, center, radius, target.getYRot(), new ArrayList<>(parts), sources);
+		String[] source = new String[1];
+		float yaw = facing(target, parts, source);
+		return new Result(box, center, radius, yaw, source[0], new ArrayList<>(parts), sources);
+	}
+
+	/**
+	 * Orientation de la cible, pour que "front" montre sa face.
+	 *
+	 * <p>Le yaw de l'entite ne vaut que pour une entite vanilla. Un modele ModelEngine ou un meuble
+	 * Nexo est oriente par ses displays (voir {@link Facing}) : on lit d'abord la cible elle-meme si
+	 * c'est un display, puis ses displays passagers, puis a defaut les displays attaches trouves
+	 * dans le rayon, et en dernier recours le yaw de l'entite. Le repli sur les displays attaches
+	 * compte : sur le serveur de test, les passagers de la base d'un PNJ sont des displays fantomes
+	 * en billboard vertical, et le modele visible est porte par une seconde base au meme endroit.
+	 */
+	static float facing(Entity target, Set<Entity> parts, String[] sourceOut) {
+		List<Facing.Sample> own = new ArrayList<>();
+		if (target instanceof Display d) addSample(d, own);
+		for (Entity p : target.getPassengers()) if (p instanceof Display d) addSample(d, own);
+		double yaw = Facing.yawOf(own);
+		if (!Double.isNaN(yaw)) {
+			sourceOut[0] = "displays";
+			return (float) yaw;
+		}
+		List<Facing.Sample> attached = new ArrayList<>();
+		for (Entity e : parts) if (e != target && e instanceof Display d && d.getVehicle() != target) addSample(d, attached);
+		yaw = Facing.yawOf(attached);
+		if (!Double.isNaN(yaw)) {
+			sourceOut[0] = "attachedDisplays";
+			return (float) yaw;
+		}
+		sourceOut[0] = "entity";
+		return target.getYRot();
+	}
+
+	/**
+	 * Ce qu'un display dit de son orientation, s'il en a une : un texte, un objet vide, ou un
+	 * display qui suit la camera (billboard vertical ou centre) n'en ont pas. Un display fixe dans
+	 * le monde, ou qui ne suit la camera qu'en hauteur, garde son yaw d'entite et sa rotation.
+	 */
+	private static void addSample(Display display, List<Facing.Sample> out) {
+		if (display instanceof Display.TextDisplay) return;
+		if (display instanceof Display.ItemDisplay item && item.getSlot(0).get().isEmpty()) return;
+		Display.RenderState state = display.renderState();
+		if (state == null) return;
+		Display.BillboardConstraints billboard = state.billboardConstraints();
+		if (billboard != Display.BillboardConstraints.FIXED && billboard != Display.BillboardConstraints.HORIZONTAL) return;
+		out.add(new Facing.Sample(state.transformation().get(1.0f).leftRotation(), display.getYRot()));
 	}
 }

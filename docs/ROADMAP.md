@@ -364,6 +364,32 @@ Reste a faire, par impact decroissant :
 Regle pour la suite : une image coute largeur x hauteur / 750 tokens, plafonnee a 1 568 px de grand
 cote ; le format et la qualite JPEG n'y changent rien.
 
+## Correctif : angle front sur les PNJ ModelEngine (verifie en jeu le 2026-09-10)
+
+`frame_target` prenait l'orientation de la cible dans `Entity.getYRot()`, qui vaut 0 sur la base
+d'un PNJ ModelEngine (`area_effect_cloud`) comme sur ses displays : "front" montrait le dos.
+L'orientation est dans la rotation gauche de la transformation des displays, lue par
+`Display.renderState().transformation().get(1).leftRotation()`.
+
+Calibration en jeu, en lisant les rotations par reflexion et en photographiant deux PNJ depuis les
+points cardinaux : identite regarde le sud, une rotation de `a` degres autour de +Y regarde vers le
+yaw `-a` (PNJ a -166 degres tourne vers le nord, PNJ a -127 vers le nord-ouest), et le yaw d'entite
+du display s'y ajoute, ce qui couvre un meuble Nexo oriente par son entite. `studio/Facing` fait
+la moyenne circulaire des displays, ponderee par la lisibilite de chaque rotation, un os anime ou
+une tete tournee pesant moins que le corps.
+
+Piege trouve en chemin : les passagers de la base d'un PNJ sont des displays fantomes (objet
+`custom_model_data` 1 invisible, billboard `VERTICAL`, rotation identite) et le modele visible est
+porte par une seconde base au meme endroit. Un display qui suit la camera ne dit rien de son
+orientation : `StudioBounds.facing` ignore les billboards `VERTICAL` et `CENTER`, les textes et les
+objets vides, puis se replie sur les displays attaches dans le rayon quand la cible n'a rien
+d'exploitable. Le resultat complet porte `targetYawSource` (`displays`, `attachedDisplays`,
+`entity`).
+
+Verifie apres redemarrage sur les deux PNJ, par leurs deux bases chacun : la base fantome passe par
+les displays attaches (yaw 165 et 127), le modele visible par ses propres displays (161 et 127),
+et `front` montre la face dans les quatre cas.
+
 ## Lot 4 : rendu hors ecran
 
 Reproduire le mecanisme vanilla qui dessine le joueur dans l'inventaire :

@@ -773,7 +773,8 @@ export const TOOLS: ToolDef[] = [
       "Le cadrage se corrige tout seul : la premiere prise garantit que rien n'est coupe, puis le sujet est mesure sur le fond uni " +
       "pour rapprocher la camera (refine) et rogner l'image (autoCrop). Si le resultat ne convient pas, jouer sur margin, ou fixer distance. " +
       "studio_bounds montre la mesure retenue sans consommer d'image. " +
-      "angles : front, back, left, right, top, bottom, iso, iso_left, three_quarter (azimut relatif a l'orientation de la cible). " +
+      "angles : front, back, left, right, top, bottom, iso, iso_left, three_quarter (azimut relatif a l'orientation de la cible, " +
+      "lue dans la rotation de ses displays pour un modele ModelEngine ou un meuble Nexo, a defaut dans le yaw de l'entite). " +
       "turntable N produit N vues reparties sur 360 degres. Maximum 12 vues par appel, chacune renvoyee comme une image : " +
       "commencer par une seule vue, et utiliser studio_bounds pour verifier un cadrage sans consommer d'images. " +
       "Necessite la permission de /tp et /gamemode ; sans elle, l'appel echoue avant tout deplacement. " +
