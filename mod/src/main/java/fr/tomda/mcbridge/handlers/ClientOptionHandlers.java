@@ -18,7 +18,7 @@ public final class ClientOptionHandlers {
 	public static void register(RpcRouter router) {
 		router.register("client.getOptions", ctx -> ClientMc.call(ClientOptionHandlers::snapshot));
 
-		router.register("client.setOptions", ctx -> {
+		router.registerExclusive("client.setOptions", ctx -> {
 			if (!McBridgeMod.config().enableClientOptions) {
 				throw RpcException.unavailable("La modification des options est desactivee (enableClientOptions=false).");
 			}

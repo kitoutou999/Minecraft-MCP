@@ -40,6 +40,16 @@ public final class BridgeConfig {
 	public int reloadTimeoutMs = 90000;
 
 	/**
+	 * Temps max qu'une action attend que le client se libere avant d'echouer en {@code busy}.
+	 *
+	 * <p>Les actions qui prennent le controle du client (capture, cadrage, focus, interface) sont
+	 * serialisees : deux en parallele se marcheraient dessus, la restauration de la premiere
+	 * effacant le reglage de la seconde. Au-dela de ce delai, mieux vaut un refus lisible qu'une
+	 * attente qui depasse le delai du client MCP.
+	 */
+	public int busyTimeoutMs = 30000;
+
+	/**
 	 * Commandes vanilla que le mod envoie lui-meme, sous leur forme qualifiee.
 	 *
 	 * <p>Le prefixe {@code minecraft:} est indispensable des qu'un plugin redefinit la commande.
@@ -70,6 +80,36 @@ public final class BridgeConfig {
 	 * verifiee apres coup, et la commande sert de repli si le serveur corrige le joueur.
 	 */
 	public boolean preferClientTeleport = true;
+
+	/** Canal RCON facultatif, voir {@link Rcon}. */
+	public Rcon rcon = new Rcon();
+
+	/**
+	 * Acces RCON au serveur, facultatif et desactive par defaut.
+	 *
+	 * <p>Quand il est renseigne, les actions qui relevent du serveur (teleportation, mode de jeu)
+	 * passent par la console plutot que par des commandes envoyees en tant que joueur. Trois gains :
+	 * plus de compteur anti-spam, plus besoin que le compte soit operateur, et la sortie des
+	 * commandes redevient lisible. Il ouvre aussi les outils {@code server.*}.
+	 *
+	 * <p>Le mot de passe donne le controle total du serveur : ne l'inscrire que sur une machine de
+	 * confiance, et de preference pour un serveur de developpement. Sans lui, tout continue de
+	 * fonctionner comme avant, par commandes joueur.
+	 */
+	public static final class Rcon {
+		public boolean enabled = false;
+		public String host = "127.0.0.1";
+		public int port = 25575;
+		public String password = "";
+		public int timeoutMs = 5000;
+		/**
+		 * Commandes refusees par {@code server.command}.
+		 *
+		 * <p>Garde-fou minimal contre l'arret accidentel du serveur : c'est le seul geste que rien
+		 * ne rattrape. Comparaison sur le premier mot, prefixe de plugin ignore.
+		 */
+		public List<String> blockedCommands = new ArrayList<>(List.of("stop", "restart", "reload"));
+	}
 
 	// --- portes de capacites --------------------------------------------------------------------
 	public boolean enableVision = true;
@@ -102,8 +142,13 @@ public final class BridgeConfig {
 	public Screenshot screenshot = new Screenshot();
 
 	public static final class Screenshot {
-		/** Largeur max par defaut de l'image renvoyee (0 = taille native du framebuffer). */
-		public int defaultMaxWidth = 1280;
+		/**
+		 * Largeur max par defaut de l'image renvoyee (0 = taille native du framebuffer). Une image
+		 * coute largeur x hauteur / 750 tokens et reste dans le contexte a chaque tour : 960 px, soit
+		 * environ 690 tokens en 16:9, suffit pour juger une scene ; le texte des interfaces se lit
+		 * par gui.state et gui.tooltip, pas sur une capture du monde.
+		 */
+		public int defaultMaxWidth = 960;
 		/** "png" ou "jpeg". Le JPEG coute beaucoup moins de tokens pour un modele de vision. */
 		public String defaultFormat = "jpeg";
 		/** Qualite JPEG entre 0 et 1. */
@@ -145,6 +190,11 @@ public final class BridgeConfig {
 		if (cfg.teleportCommand == null || cfg.teleportCommand.isBlank()) cfg.teleportCommand = "minecraft:tp";
 		if (cfg.gamemodeCommand == null || cfg.gamemodeCommand.isBlank()) cfg.gamemodeCommand = "minecraft:gamemode";
 		if (cfg.commandMinIntervalMs < 0) cfg.commandMinIntervalMs = 1100;
+		if (cfg.busyTimeoutMs < 0) cfg.busyTimeoutMs = 30000;
+		if (cfg.rcon == null) cfg.rcon = new Rcon();
+		if (cfg.rcon.blockedCommands == null) {
+			cfg.rcon.blockedCommands = new ArrayList<>(List.of("stop", "restart", "reload"));
+		}
 		if (cfg.allowedClickTypes == null || cfg.allowedClickTypes.isEmpty()) {
 			cfg.allowedClickTypes = new ArrayList<>(List.of("pickup", "quick_move"));
 		}

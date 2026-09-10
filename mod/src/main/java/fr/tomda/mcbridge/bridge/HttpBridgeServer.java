@@ -76,7 +76,7 @@ public final class HttpBridgeServer {
 		JsonObject o = new JsonObject();
 		o.addProperty("ok", true);
 		o.addProperty("name", "mcbridge");
-		o.addProperty("version", McBridgeMod.MOD_VERSION);
+		o.addProperty("version", McBridgeMod.modVersion());
 		respond(ex, 200, Json.GSON.toJson(o));
 	}
 

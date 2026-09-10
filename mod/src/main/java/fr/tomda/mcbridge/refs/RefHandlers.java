@@ -14,6 +14,7 @@ import fr.tomda.mcbridge.handlers.VisionHandlers;
 import fr.tomda.mcbridge.mixin.AbstractContainerScreenAccessor;
 import fr.tomda.mcbridge.util.ClientMc;
 import fr.tomda.mcbridge.util.Commands;
+import fr.tomda.mcbridge.util.Excursion;
 import fr.tomda.mcbridge.util.Images;
 import fr.tomda.mcbridge.util.TickWaiter;
 import net.minecraft.client.Minecraft;
@@ -46,9 +47,9 @@ public final class RefHandlers {
 	private RefHandlers() {}
 
 	public static void register(RpcRouter router) {
-		router.register("refs.save", RefHandlers::save);
-		router.register("refs.compare", RefHandlers::compare);
-		router.register("refs.compareAll", RefHandlers::compareAll);
+		router.registerExclusive("refs.save", RefHandlers::save);
+		router.registerExclusive("refs.compare", RefHandlers::compare);
+		router.registerExclusive("refs.compareAll", RefHandlers::compareAll);
 		router.register("refs.list", ctx -> {
 			JsonArray arr = new JsonArray();
 			try {
@@ -200,31 +201,16 @@ public final class RefHandlers {
 		if (!cfg.enableCommands) {
 			throw RpcException.unavailable("Le placement de la camera passe par une commande et enableCommands=false.");
 		}
-		FocusState.Snapshot focusBefore = FocusState.INSTANCE.snapshot();
-		Object[] before = ClientMc.call(() -> {
-			LocalPlayer p = ClientMc.player();
-			return new Object[]{p.position(), p.getYRot(), p.getXRot(),
-					mc.gameMode != null ? mc.gameMode.getPlayerMode().getSerializedName() : "unknown",
-					mc.options.fov().get()};
-		});
-		Vec3 startPos = (Vec3) before[0];
-		float startYaw = (float) before[1];
-		float startPitch = (float) before[2];
-		String startMode = (String) before[3];
-		int startFov = (int) before[4];
-		boolean modeChanged = false;
-
-		try {
-			if (!"spectator".equals(startMode)) {
-				command(cfg.gamemodeCommand + " spectator");
-				MainThread.await(TickWaiter.after(4), 4000);
-				String now = ClientMc.call(() ->
-						mc.gameMode != null ? mc.gameMode.getPlayerMode().getSerializedName() : "unknown");
-				if (!"spectator".equals(now)) {
-					throw RpcException.forbidden("Passage en spectateur refuse par le serveur (mode actuel : " + now + ").");
-				}
-				modeChanged = true;
-			}
+		// Une recette se rejoue a l'identique : meme point de vue, meme champ de vision, meme
+		// isolement du sujet, et rien qui reste apres coup. Le champ de vision n'est force que si la
+		// recette en porte un ; sinon celui du joueur convient et ne bouge pas.
+		Integer recipeFov = recipe.has("fov") ? recipe.get("fov").getAsInt() : null;
+		try (Excursion excursion = Excursion.begin(Excursion.options()
+				.spectator(true)
+				.fov(recipeFov)
+				.restorePosition(true)
+				.restoreMode(true)
+				.restoreFocus(true))) {
 
 			JsonObject scene = recipe.has("scene") ? recipe.getAsJsonObject("scene") : null;
 			if (scene != null) {
@@ -273,12 +259,6 @@ public final class RefHandlers {
 						opt(focus, "hideOthers"), opt(focus, "hideSelf"), opt(focus, "hideCameraOccluders"));
 			}
 
-			int fov = recipe.has("fov") ? recipe.get("fov").getAsInt() : startFov;
-			ClientMc.call(() -> {
-				mc.options.fov().set(fov);
-				return null;
-			});
-
 			JsonObject cam = recipe.getAsJsonObject("camera");
 			Vec3 wantedEye = new Vec3(cam.get("x").getAsDouble(), cam.get("y").getAsDouble(), cam.get("z").getAsDouble());
 			Commands.moveCamera(wantedEye, cam.get("yaw").getAsFloat(), cam.get("pitch").getAsFloat());
@@ -292,19 +272,6 @@ public final class RefHandlers {
 						actual.distanceTo(wantedEye)));
 			}
 			return png;
-		} finally {
-			FocusState.INSTANCE.restore(focusBefore);
-			try {
-				ClientMc.call(() -> {
-					mc.options.fov().set(startFov);
-					return null;
-				});
-				Commands.moveCamera(startPos.add(0, ClientMc.call(() -> (double) ClientMc.player().getEyeHeight()), 0),
-						startYaw, startPitch);
-				if (modeChanged && !"unknown".equals(startMode)) command(cfg.gamemodeCommand + " " + startMode);
-			} catch (Exception restoreFailed) {
-				McBridgeMod.LOGGER.warn("[mcbridge] restauration apres une reference incomplete", restoreFailed);
-			}
 		}
 	}
 
@@ -312,9 +279,6 @@ public final class RefHandlers {
 		return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsBoolean() : null;
 	}
 
-	private static void command(String command) throws RpcException {
-		Commands.send(command);
-	}
 
 	// --- comparaison -----------------------------------------------------------------------------
 
@@ -323,14 +287,42 @@ public final class RefHandlers {
 		if (!RefStore.exists(name)) throw RpcException.notFound("Reference inconnue : " + name);
 		int tolerance = Math.max(0, Math.min(ctx.optInt("tolerance", 8), 255));
 		boolean includeDiff = ctx.optBoolean("includeDiffImage", true);
-		return compareOne(name, tolerance, includeDiff);
+		int diffMaxWidth = Math.max(0, Math.min(ctx.optInt("diffMaxWidth", DEFAULT_DIFF_MAX_WIDTH), 4096));
+		double minPercent = Math.max(0, ctx.optDouble("diffImageMinPercent", DEFAULT_CHANGED_THRESHOLD_PERCENT));
+		return compareOne(name, tolerance, includeDiff, diffMaxWidth, minPercent);
 	}
 
-	private static JsonObject compareOne(String name, int tolerance, boolean includeDiff) throws Exception {
+	/** Largeur par defaut de l'image des differences : de quoi voir un detail sans payer une capture pleine. */
+	private static final int DEFAULT_DIFF_MAX_WIDTH = 640;
+	/**
+	 * Part de pixels differents en deca de laquelle une reference est consideree inchangee. Une scene
+	 * vivante a un bruit de fond : entites qui bougent, joueurs qui passent. Mesure sur le serveur de
+	 * test : environ 0,2 % de pixels sans rien changer, contre 3 % pour une vraie difference. Le
+	 * seuil se place entre les deux ; isoler le sujet avec 'focus' fait tomber le bruit a presque rien.
+	 */
+	private static final double DEFAULT_CHANGED_THRESHOLD_PERCENT = 0.5;
+
+	private static final List<String> DIFF_IMAGE_KEYS = List.of(
+			"diffBase64", "diffFormat", "diffMimeType", "diffBytes", "diffWidth", "diffHeight", "diffCrop");
+
+	/**
+	 * Rejoue une reference et la compare. L'image des differences n'est jointe qu'au-dela de
+	 * {@code minPercent} : en dessous, elle ne montrerait que le bruit d'une scene vivante, pour le
+	 * prix d'une image.
+	 */
+	private static JsonObject compareOne(String name, int tolerance, boolean includeDiff, int diffMaxWidth,
+	                                     double minPercent) throws Exception {
 		JsonObject recipe = RefStore.loadRecipe(name);
 		byte[] reference = RefStore.loadImage(name);
 		byte[] current = execute(recipe);
-		JsonObject result = Images.diff(reference, current, tolerance, includeDiff);
+		JsonObject result = Images.diff(reference, current, tolerance, includeDiff, true, diffMaxWidth);
+		double percent = result.get("percentDiffering").getAsDouble();
+		if (result.has("diffBase64") && percent < minPercent) {
+			for (String k : DIFF_IMAGE_KEYS) result.remove(k);
+			result.addProperty("diffImageOmitted", String.format(Locale.ROOT,
+					"%.3f %% de pixels differents, sous le seuil diffImageMinPercent de %.2f %% : bruit d'une scene "
+							+ "vivante plutot qu'un changement. Baisser le seuil pour voir l'image quand meme.", percent, minPercent));
+		}
 		result.addProperty("name", name);
 		result.add("recipe", recipe);
 		return result;
@@ -341,11 +333,8 @@ public final class RefHandlers {
 		// Une image de difference par reference saturerait la reponse : par defaut, seul le verdict
 		// chiffre est renvoye, et l'appelant relance refs.compare sur celles qui ont bouge.
 		boolean includeDiff = ctx.optBoolean("includeDiffImages", false);
-		// Une scene vivante a un bruit de fond : entites qui bougent, joueurs qui passent. Mesure sur
-		// le serveur de test : environ 0,2 % de pixels sans rien changer, contre 3 % pour une vraie
-		// difference. Le seuil se place entre les deux ; isoler le sujet avec 'focus' fait tomber le
-		// bruit a presque rien.
-		double threshold = ctx.optDouble("changedThresholdPercent", 0.5);
+		int diffMaxWidth = Math.max(0, Math.min(ctx.optInt("diffMaxWidth", DEFAULT_DIFF_MAX_WIDTH), 4096));
+		double threshold = Math.max(0, ctx.optDouble("changedThresholdPercent", DEFAULT_CHANGED_THRESHOLD_PERCENT));
 		List<String> names;
 		try {
 			names = RefStore.list();
@@ -354,22 +343,11 @@ public final class RefHandlers {
 		}
 		// Passer une seule fois en spectateur pour toute la serie : chaque recette y verrait sinon un
 		// changement de mode a faire et a defaire, soit deux commandes par reference, de quoi se faire
-		// deconnecter pour spam sur une dizaine de references.
-		BridgeConfig cfg = McBridgeMod.config();
-		Minecraft mc = ClientMc.mc();
-		String startMode = ClientMc.call(() ->
-				mc.gameMode != null ? mc.gameMode.getPlayerMode().getSerializedName() : "unknown");
-		boolean modeChanged = false;
-		if (!names.isEmpty() && !"spectator".equals(startMode)) {
-			Commands.send(cfg.gamemodeCommand + " spectator");
-			MainThread.await(TickWaiter.after(4), 4000);
-			String now = ClientMc.call(() ->
-					mc.gameMode != null ? mc.gameMode.getPlayerMode().getSerializedName() : "unknown");
-			if (!"spectator".equals(now)) {
-				throw RpcException.forbidden("Passage en spectateur refuse par le serveur (mode actuel : " + now + ").");
-			}
-			modeChanged = true;
-		}
+		// deconnecter pour spam sur une dizaine de references. La position n'a pas a etre restauree
+		// ici, chaque comparaison ramenant deja le joueur d'ou elle l'a pris.
+		Excursion excursion = names.isEmpty() ? null : Excursion.begin(Excursion.options()
+				.spectator(true)
+				.restoreMode(true));
 
 		JsonArray results = new JsonArray();
 		int changed = 0;
@@ -379,7 +357,9 @@ public final class RefHandlers {
 			JsonObject entry = new JsonObject();
 			entry.addProperty("name", name);
 			try {
-				JsonObject d = compareOne(name, tolerance, includeDiff);
+				// Le seuil de verdict sert aussi de seuil d'image : une reference declaree inchangee
+				// n'a pas d'image a montrer.
+				JsonObject d = compareOne(name, tolerance, includeDiff, diffMaxWidth, threshold);
 				double percent = d.get("percentDiffering").getAsDouble();
 				boolean hasChanged = percent >= threshold;
 				if (hasChanged) changed++;
@@ -389,7 +369,9 @@ public final class RefHandlers {
 				entry.addProperty("maxDelta", d.get("maxDelta").getAsInt());
 				if (d.has("differenceBox")) entry.add("differenceBox", d.get("differenceBox"));
 				if (d.get("resized").getAsBoolean()) entry.addProperty("resized", true);
-				if (includeDiff && d.has("diffBase64")) entry.add("diffBase64", d.get("diffBase64"));
+				if (includeDiff && d.has("diffBase64")) {
+					for (String k : DIFF_IMAGE_KEYS) if (d.has(k)) entry.add(k, d.get(k));
+				}
 			} catch (RpcException e) {
 				failed++;
 				entry.addProperty("error", e.code() + ": " + e.getMessage());
@@ -397,13 +379,7 @@ public final class RefHandlers {
 			results.add(entry);
 		}
 		} finally {
-			if (modeChanged && !"unknown".equals(startMode)) {
-				try {
-					Commands.send(cfg.gamemodeCommand + " " + startMode);
-				} catch (Exception e) {
-					McBridgeMod.LOGGER.warn("[mcbridge] retour au mode de jeu initial impossible", e);
-				}
-			}
+			if (excursion != null) excursion.close();
 		}
 		JsonObject o = new JsonObject();
 		o.addProperty("total", names.size());

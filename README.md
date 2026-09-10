@@ -112,7 +112,7 @@ Dans `config/mcbridge.json` du client, mettre `host` à `0.0.0.0` et `allowRemot
 port, puis côté MCP donner `MCBRIDGE_URL=http://<adresse du client>:25580` et `MCBRIDGE_TOKEN`. Le
 jeton reste obligatoire.
 
-## Les 48 outils
+## Les 51 outils
 
 | Groupe | Outils |
 |---|---|
@@ -125,7 +125,9 @@ jeton reste obligatoire.
 | Références | `save_reference`, `compare_reference`, `compare_all_references`, `list_references`, `delete_reference` |
 | Monde | `get_block`, `list_entities`, `get_entity` |
 | Chat et commandes | `send_command`, `send_chat`, `get_chat`, `poll_events` |
+| Serveur (RCON) | `server_status`, `server_command` |
 | Client | `get_client_options`, `set_client_options`, `reload_resource_pack`, `get_client_log`, `wait_ticks` |
+| Enchaînement | `run_steps` : plusieurs outils en un seul appel, pour ne payer qu'un tour de conversation |
 | Réflexion | `reflect_invoke`, `reflect_get_field`, `reflect_set_field`, `reflect_new_instance`, `get_class_info`, `var_get`, `var_list`, `var_delete`, `var_clear` |
 
 Référence complète avec tous les paramètres : [docs/TOOLS.md](docs/TOOLS.md), fichier généré depuis
@@ -166,22 +168,38 @@ Fichier `config/mcbridge.json` du client.
 | `token`, `requireAuth` | généré, `true` | Jeton bearer obligatoire. |
 | `allowRemote` | `false` | Refuse toute connexion non locale, même si `host` change. |
 | `commandMinIntervalMs` | `1100` | Intervalle minimal entre deux commandes. Un serveur déconnecte pour spam au-delà d'une dizaine de commandes rapprochées. |
+| `busyTimeoutMs` | `30000` | Délai d'attente quand une autre prise de vue occupe déjà le client, avant de répondre `busy`. |
+| `rcon.*` | désactivé | Accès console facultatif : `enabled`, `host`, `port`, `password`, `blockedCommands`. Voir plus bas. |
 | `preferClientTeleport` | `true` | En spectateur, déplacer la caméra sans commande. |
 | `teleportCommand`, `gamemodeCommand` | `minecraft:tp`, `minecraft:gamemode` | Forme qualifiée, pour contourner les plugins qui redéfinissent ces commandes. |
 | `enableVision`, `enableCommands`, `enableClientOptions`, `enableFocus`, `enableReflection` | `true` | Portes de capacités. |
 | `enableGuiClicks` | `false` | Autorise le clic dans un menu, seule action qui modifie l'état du serveur. |
-| `screenshot.*` | jpeg, 1280 px | Format et taille par défaut des captures. |
+| `screenshot.*` | jpeg, 960 px | Format et taille par défaut des captures. 960 px coûte environ 690 tokens par image, 1280 px en coûte 1230. |
 | `reflection.*` | voir le fichier | Classes accessibles par réflexion. |
+
+## RCON, facultatif
+
+Sans lui, tout fonctionne : les téléportations et changements de mode passent par des commandes
+envoyées en tant que joueur, avec ses permissions et la limite anti-spam du serveur.
+
+Renseigner le bloc `rcon` de `mcbridge.json` change trois choses : ces actions s'exécutent en tant
+que console, donc sans compteur anti-spam et sans exiger que le compte soit opérateur ; la sortie
+des commandes redevient lisible ; et `server_command` ouvre ce que seul le serveur sait, comme le
+catalogue d'objets d'un plugin ou la liste de ses mobs.
+
+Le mot de passe donne le contrôle total du serveur et **le protocole n'est pas chiffré** : à
+réserver à une liaison locale, de préférence sur un serveur de développement. `blockedCommands`
+refuse `stop`, `restart` et `reload`, y compris cachées derrière un `execute ... run`.
 
 ## Sécurité
 
 Le pont écoute en local et exige un jeton comparé en temps constant. Il refuse les connexions non
 locales même si l'adresse d'écoute change.
 
-Le mod **observe et pilote le client**, il ne touche pas au serveur, à deux exceptions près,
-toutes deux explicites : les commandes envoyées en tant que joueur, avec les permissions de ce
-joueur, et le clic dans un menu, désactivé par défaut. Un clic part vraiment au serveur : dans une
-boutique, il achète.
+Le mod **observe et pilote le client**, il ne touche pas au serveur, à trois exceptions près,
+toutes explicites : les commandes envoyées en tant que joueur, avec les permissions de ce joueur ;
+le clic dans un menu, désactivé par défaut, qui part vraiment au serveur, et dans une boutique
+achète ; et RCON, désactivé par défaut, qui donne la console.
 
 La réflexion donne accès à tout le client Java. L'exécution de processus, l'accès aux fichiers et au
 réseau sont bloqués par défaut, et la capacité entière se désactive d'une ligne.
@@ -198,8 +216,8 @@ actif, ciel et brouillard lui appartiennent, donc désactivez les shaders pour l
 ## Structure
 
 ```
-mod/          mod Fabric client (Java 25)
-mcp-server/   serveur MCP TypeScript, catalogue dans src/tools.ts
+mod/          mod Fabric client (Java 25), tests unitaires dans src/test
+mcp-server/   serveur MCP TypeScript, catalogue dans src/tools.ts, tests dans test/
 plugins/      plugin Claude Code, avec le serveur regroupé et le jar du mod
 .claude-plugin/  déclaration du dépôt comme marketplace
 docs/         architecture, protocole, référence des outils, feuille de route
@@ -207,6 +225,19 @@ scripts/      appel direct du pont, capture, génération de la documentation et
 examples/     configuration pour Claude Desktop
 CLAUDE.md     consignes pour les IA qui font évoluer ce dépôt
 ```
+
+## Développer
+
+```bash
+cd mod && ./gradlew test        # 51 tests, sans Minecraft
+cd mcp-server && npm run verify # tests, cohérence du contrat, smoke
+scripts/build-plugin.sh         # reconstruit les artefacts du plugin
+```
+
+Les tests couvrent ce qui se calcule hors du jeu : géométrie du cadrage, mesure du sujet et
+comparaison d'images, protocole RCON, filtres, sérialisation des actions, catalogue des outils.
+`scripts/check-contract.mjs` vérifie que le catalogue et les handlers du mod décrivent la même
+chose. Le rendu et les captures demandent un vrai client, et se vérifient à la main.
 
 ## Feuille de route
 

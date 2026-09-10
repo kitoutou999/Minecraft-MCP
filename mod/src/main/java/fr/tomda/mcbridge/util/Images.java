@@ -233,9 +233,27 @@ public final class Images {
 	 * redimensionnement et non d'un vrai changement.
 	 *
 	 * @param tolerance ecart tolere par canal avant de compter un pixel comme different
-	 * @param diffImage produire une image ou les pixels differents sont surlignes
+	 * @param diffImage produire une image ou les pixels differents sont surlignes, a la taille de
+	 *                  la reference
 	 */
 	public static JsonObject diff(byte[] referencePng, byte[] currentPng, int tolerance, boolean diffImage) throws IOException {
+		return diff(referencePng, currentPng, tolerance, diffImage, false, 0);
+	}
+
+	/**
+	 * Compare deux captures, avec une image des differences recadree et reduite.
+	 *
+	 * <p>Une image de differences a la taille de la fenetre coute au modele autant qu'une capture
+	 * pleine, pour montrer surtout du gris. Recadree sur la zone touchee, avec une marge pour situer
+	 * le changement, puis ramenee a {@code maxWidth}, elle montre la difference de plus pres pour
+	 * une fraction du cout. {@code diffCrop} donne la zone gardee en pixels de la reference, pour
+	 * situer l'image dans le cadre complet.
+	 *
+	 * @param cropToBox recadrer l'image des differences sur {@code differenceBox} plus une marge
+	 * @param maxWidth  largeur maximale de l'image des differences (0 = pas de reduction)
+	 */
+	public static JsonObject diff(byte[] referencePng, byte[] currentPng, int tolerance, boolean diffImage,
+	                              boolean cropToBox, int maxWidth) throws IOException {
 		BufferedImage ref = ImageIO.read(new java.io.ByteArrayInputStream(referencePng));
 		BufferedImage cur = ImageIO.read(new java.io.ByteArrayInputStream(currentPng));
 		if (ref == null || cur == null) throw new IOException("PNG illisible pour la comparaison");
@@ -306,13 +324,48 @@ public final class Images {
 			o.add("differenceBox", box);
 		}
 		if (out != null && differing > 0) {
-			byte[] bytes = writePng(out);
+			BufferedImage img = out;
+			if (cropToBox) {
+				// Marge autour de la zone touchee : au moins 16 pixels, ou un dixieme de sa taille.
+				int bw = maxX - minX + 1;
+				int bh = maxY - minY + 1;
+				int pad = Math.max(16, (int) Math.round(Math.max(bw, bh) * 0.1));
+				int cx = Math.max(0, minX - pad);
+				int cy = Math.max(0, minY - pad);
+				int cw = Math.min(w, maxX + 1 + pad) - cx;
+				int ch = Math.min(h, maxY + 1 + pad) - cy;
+				if (cw < w || ch < h) {
+					img = out.getSubimage(cx, cy, cw, ch);
+					JsonObject c = new JsonObject();
+					c.addProperty("x", cx);
+					c.addProperty("y", cy);
+					c.addProperty("width", cw);
+					c.addProperty("height", ch);
+					o.add("diffCrop", c);
+				}
+			}
+			if (maxWidth > 0 && img.getWidth() > maxWidth) img = scaleToWidth(img, maxWidth);
+			byte[] bytes = writePng(img);
 			o.addProperty("diffFormat", "png");
 			o.addProperty("diffMimeType", "image/png");
+			o.addProperty("diffWidth", img.getWidth());
+			o.addProperty("diffHeight", img.getHeight());
 			o.addProperty("diffBytes", bytes.length);
 			o.addProperty("diffBase64", Base64.getEncoder().encodeToString(bytes));
 		}
 		return o;
+	}
+
+	/** Reduction bilineaire a la largeur donnee, en conservant les proportions. */
+	private static BufferedImage scaleToWidth(BufferedImage src, int width) {
+		int height = Math.max(1, (int) Math.round(src.getHeight() * (width / (double) src.getWidth())));
+		BufferedImage out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+		Graphics2D g = out.createGraphics();
+		g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+		g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+		g.drawImage(src, 0, 0, width, height, null);
+		g.dispose();
+		return out;
 	}
 
 	private static BufferedImage toType(BufferedImage src, boolean jpeg) {

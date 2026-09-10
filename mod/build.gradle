@@ -14,7 +14,8 @@ base {
 }
 
 repositories {
-	// Loom ajoute automatiquement les depots Minecraft et Fabric.
+	// Loom ajoute automatiquement les depots Minecraft et Fabric ; mavenCentral sert a JUnit.
+	mavenCentral()
 }
 
 loom {
@@ -30,6 +31,21 @@ dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	testImplementation platform("org.junit:junit-bom:${junit_version}")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+// Tests unitaires des parties calculables hors du jeu : cadrage, comparaison d'images, protocole
+// RCON, filtres. Aucun client Minecraft n'est lance ; ce qui demande un joueur en jeu se verifie a
+// la main (voir CLAUDE.md).
+tasks.named('test') {
+	useJUnitPlatform()
+	testLogging {
+		events "failed"
+		exceptionFormat "full"
+	}
 }
 
 processResources {

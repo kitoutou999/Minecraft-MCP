@@ -18,7 +18,7 @@ public final class ResourceHandlers {
 	private ResourceHandlers() {}
 
 	public static void register(RpcRouter router, EventBus events) {
-		router.register("resources.reload", ctx -> {
+		router.registerExclusive("resources.reload", ctx -> {
 			long start = System.currentTimeMillis();
 			CompletableFuture<Void> reload = ClientMc.call(() -> ClientMc.mc().reloadResourcePacks());
 			MainThread.await(reload, McBridgeMod.config().reloadTimeoutMs);

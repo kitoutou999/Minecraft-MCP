@@ -64,7 +64,7 @@ public final class GuiHandlers {
 		router.register("gui.state", ctx -> ClientMc.call(() -> state(ctx.optBoolean("includeEmpty", false),
 				ctx.optBoolean("includeTooltipLineCount", true))));
 
-		router.register("gui.open", ctx -> {
+		router.registerExclusive("gui.open", ctx -> {
 			String which = ctx.optString("screen", "inventory").toLowerCase(Locale.ROOT);
 			if (!which.equals("inventory")) {
 				throw RpcException.badRequest("Seul 'inventory' peut etre ouvert par le mod. Un menu de plugin "
@@ -77,7 +77,7 @@ public final class GuiHandlers {
 			});
 		});
 
-		router.register("gui.close", ctx -> ClientMc.call(() -> {
+		router.registerExclusive("gui.close", ctx -> ClientMc.call(() -> {
 			Minecraft mc = ClientMc.mc();
 			String was = mc.screen != null ? mc.screen.getClass().getSimpleName() : null;
 			if (mc.screen != null) mc.setScreen(null);
@@ -88,7 +88,7 @@ public final class GuiHandlers {
 			return o;
 		}));
 
-		router.register("gui.hover", ctx -> {
+		router.registerExclusive("gui.hover", ctx -> {
 			if (ctx.optBoolean("clear", false)) {
 				GuiCursor.clear();
 				JsonObject o = new JsonObject();
@@ -123,8 +123,8 @@ public final class GuiHandlers {
 			return o;
 		}));
 
-		router.register("gui.screenshot", GuiHandlers::screenshot);
-		router.register("gui.click", GuiHandlers::click);
+		router.registerExclusive("gui.screenshot", GuiHandlers::screenshot);
+		router.registerExclusive("gui.click", GuiHandlers::click);
 	}
 
 	// --- etat --------------------------------------------------------------------------------------

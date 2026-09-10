@@ -12,6 +12,7 @@ import com.google.gson.JsonElement;
  *   <li>{@code unavailable} : capacite desactivee dans la config ou non disponible</li>
  *   <li>{@code forbidden} : refuse par une liste d'autorisation (reflexion)</li>
  *   <li>{@code timeout} : le thread de jeu n'a pas repondu a temps</li>
+ *   <li>{@code busy} : une autre action exclusive tient deja le client</li>
  *   <li>{@code not_found} : entite, classe, fichier introuvable</li>
  *   <li>{@code internal} : exception non prevue</li>
  * </ul>
@@ -56,6 +57,10 @@ public final class RpcException extends Exception {
 
 	public static RpcException notFound(String message) {
 		return new RpcException("not_found", message);
+	}
+
+	public static RpcException busy(String message) {
+		return new RpcException("busy", message);
 	}
 
 	public static RpcException internal(Throwable t) {

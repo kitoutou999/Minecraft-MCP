@@ -14,8 +14,10 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 
 import { loadConfig, type ServerConfig } from "./config.js";
-import { BridgeClient, BridgeError, BridgeUnreachableError } from "./bridge.js";
+import { BridgeClient } from "./bridge.js";
 import { TOOLS, type ToolDef } from "./tools.js";
+import { convertResult, errorResult } from "./results.js";
+import { RUN_STEPS, runSteps, type Invoke } from "./steps.js";
 
 const PKG_VERSION = "0.1.0";
 
@@ -29,97 +31,35 @@ const INSTRUCTIONS =
   "click_slot navigue dans un menu de plugin, mais envoie un vrai clic au serveur : verifier le lore de la case avant, ou utiliser dryRun. " +
   "Pour juger un mouvement (animation, particules, transition), capture_animation remplace une image par une serie. " +
   "Apres une modification du pack : reload_resource_pack puis compare_all_references pour savoir ce qui a change visuellement. " +
-  "Sinon, boucle manuelle : send_command (tp / gamemode spectator) -> wait_ticks -> focus_entities (+ focus_scene) -> screenshot -> focus_clear. " +
-  "Apres une modification de pack : reload_resource_pack -> get_client_log levels ERROR,WARN -> screenshot.";
+  "Le mod ne voit que ce que le client recoit ; server_command (si RCON est configure) ouvre ce que seul le serveur sait, avec la sortie des commandes. " +
+  "Sinon, la boucle manuelle tient en un seul appel run_steps : send_command (tp / gamemode spectator), wait_ticks, focus_entities (+ focus_scene), screenshot, focus_clear. " +
+  "Regle generale : des que deux appels dependent l'un de l'autre, les passer a run_steps ; chaque appel separe coute un tour complet de conversation. " +
+  "Apres une modification de pack, en un run_steps : reload_resource_pack, get_client_log (levels ERROR,WARN), screenshot.";
 
 function log(...args: unknown[]): void {
   console.error("[mcbridge-mcp]", ...args);
 }
 
-function errorResult(err: unknown): CallToolResult {
-  let text: string;
-  if (err instanceof BridgeUnreachableError) text = `Bridge injoignable : ${err.message}`;
-  else if (err instanceof BridgeError) {
-    text = `Erreur du bridge [${err.code}] : ${err.message}`;
-    if (err.data !== undefined) text += `\n${JSON.stringify(err.data)}`;
-  } else if (err instanceof Error) text = `Erreur : ${err.message}`;
-  else text = `Erreur : ${String(err)}`;
-  return { isError: true, content: [{ type: "text", text }] };
-}
+/** Ce que le serveur MCP attend du bridge : de quoi appeler une methode. Un test y met un faux. */
+export type Bridge = Pick<BridgeClient, "call">;
 
-function jsonResult(result: unknown): CallToolResult {
-  if (result === undefined || result === null) return { content: [{ type: "text", text: "ok" }] };
-  const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-  const out: CallToolResult = { content: [{ type: "text", text }] };
-  if (typeof result === "object") out.structuredContent = result as Record<string, unknown>;
-  return out;
-}
+type Handler = (args: Record<string, unknown>) => Promise<CallToolResult>;
 
-interface ImagePayload {
-  base64: string;
-  mimeType?: string;
-  format?: string;
-  width?: number;
-  height?: number;
-  bytes?: number;
-  capture?: Record<string, unknown>;
-}
-
-function imageResult(result: unknown): CallToolResult {
-  const r = result as ImagePayload;
-  if (!r || typeof r.base64 !== "string") return errorResult(new Error("Le bridge n'a pas renvoye d'image."));
-  const mimeType = r.mimeType ?? (r.format === "jpeg" ? "image/jpeg" : "image/png");
-  const { base64: _omit, ...meta } = r;
-  return {
-    content: [
-      { type: "image", data: r.base64, mimeType },
-      { type: "text", text: `Capture ${r.width ?? "?"}x${r.height ?? "?"} ${mimeType}, ${r.bytes ?? "?"} octets. ${JSON.stringify(meta.capture ?? {})}` },
-    ],
+function registerTools(server: McpServer, bridge: Bridge): void {
+  /** Un appel direct : traduction des arguments, bridge, mise en forme. run_steps l'enchaine. */
+  const invoke: Invoke = async (def, args) => {
+    try {
+      const params = def.mapArgs ? def.mapArgs(args ?? {}) : (args ?? {});
+      const result = await bridge.call(def.method, params);
+      return convertResult(def, result);
+    } catch (err) {
+      return errorResult(err);
+    }
   };
-}
-
-/** Resultat d'un tool studio : plusieurs vues, chacune avec son image et son angle. */
-interface ShotsPayload {
-  shots?: Array<ImagePayload & { angle?: { name?: string }; camera?: Record<string, unknown> }>;
-  [key: string]: unknown;
-}
-
-function imagesResult(result: unknown): CallToolResult {
-  const r = result as ShotsPayload;
-  // Certains tools renvoient une image unique (planche d'animation) plutot qu'une serie.
-  if (typeof (result as Partial<ImagePayload> | undefined)?.base64 === "string") return imageResult(result);
-  const shots = Array.isArray(r?.shots) ? r.shots : [];
-  if (shots.length === 0) return jsonResult(result);
-  const content: CallToolResult["content"] = [];
-  for (const shot of shots) {
-    if (typeof shot.base64 !== "string") continue;
-    const mimeType = shot.mimeType ?? (shot.format === "jpeg" ? "image/jpeg" : "image/png");
-    content.push({ type: "image", data: shot.base64, mimeType });
-    content.push({
-      type: "text",
-      text: `Vue ${shot.angle?.name ?? "?"} : ${shot.width ?? "?"}x${shot.height ?? "?"}, camera ${JSON.stringify(shot.camera ?? {})}`,
-    });
-  }
-  // Metadonnees sans les images, pour que le modele garde le contexte du cadrage.
-  const meta = { ...r, shots: shots.map(({ base64: _b, ...rest }) => rest) };
-  content.push({ type: "text", text: JSON.stringify(meta, null, 2) });
-  return { content, structuredContent: meta as Record<string, unknown> };
-}
-
-/** Resultat d'une comparaison de reference : des mesures, et une image des differences si besoin. */
-function diffResult(result: unknown): CallToolResult {
-  const r = result as { diffBase64?: string; diffMimeType?: string; identical?: boolean; [k: string]: unknown };
-  const { diffBase64, ...meta } = r ?? {};
-  const content: CallToolResult["content"] = [];
-  if (typeof diffBase64 === "string") {
-    content.push({ type: "image", data: diffBase64, mimeType: r.diffMimeType ?? "image/png" });
-    content.push({ type: "text", text: "Differences en magenta sur fond grise." });
-  }
-  content.push({ type: "text", text: JSON.stringify(meta, null, 2) });
-  return { content, structuredContent: meta as Record<string, unknown> };
-}
-
-function registerTools(server: McpServer, bridge: BridgeClient): void {
+  // Tools composes cote serveur : pas de methode RPC, un handler ici.
+  const localHandlers: Record<string, Handler> = {
+    [RUN_STEPS]: (args) => runSteps(TOOLS, args ?? {}, invoke),
+  };
   for (const def of TOOLS as ToolDef[]) {
     const config = {
       title: def.title,
@@ -127,23 +67,19 @@ function registerTools(server: McpServer, bridge: BridgeClient): void {
       inputSchema: def.inputSchema,
       ...(def.annotations ? { annotations: def.annotations } : {}),
     };
-    const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
-      try {
-        const params = def.mapArgs ? def.mapArgs(args ?? {}) : (args ?? {});
-        const result = await bridge.call(def.method, params);
-        if (def.kind === "image") return imageResult(result);
-        if (def.kind === "images") return imagesResult(result);
-        if (def.kind === "diff") return diffResult(result);
-        return jsonResult(result);
-      } catch (err) {
-        return errorResult(err);
-      }
-    };
+    let handler: Handler;
+    if (def.local) {
+      const local = localHandlers[def.name];
+      if (!local) throw new Error(`tool compose sans handler cote serveur : ${def.name}`);
+      handler = local;
+    } else {
+      handler = (args) => invoke(def, args ?? {});
+    }
     server.registerTool(def.name, config, handler);
   }
 }
 
-export function buildServer(bridge: BridgeClient): McpServer {
+export function buildServer(bridge: Bridge): McpServer {
   const server = new McpServer({ name: "mcbridge", version: PKG_VERSION }, { instructions: INSTRUCTIONS });
   registerTools(server, bridge);
   return server;

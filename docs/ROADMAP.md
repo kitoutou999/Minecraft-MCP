@@ -77,7 +77,7 @@ Realise le 2026-09-09. Deux tools : `frame_target` (cadrage, prise de vue, resta
 |---|---|---|
 | Eclairage plat | `EntityRenderDispatcher.extractEntity(E, float)` renvoie l'`EntityRenderState` de la frame ; `lightCoords = 15728880` (0xF000F0) est le plein jour | `EntityRenderDispatcherMixin`, option `flatLighting` de `focus_scene` |
 | Encombrement de la cible | union, pour l'entite, ses passagers et les displays a moins de `attachRadius`, de `Display.getBoundingBoxForCulling()` quand elle est exploitable, sinon de la hitbox | `studio/StudioBounds` |
-| Distance camera | projection des 8 coins de la boite dans le repere camera, contrainte `|lateral| <= profondeur * tan(demi-champ)` sur les deux axes, maximum retenu | `studio/StudioHandlers.fitDistance` |
+| Distance camera | projection des 8 coins de la boite dans le repere camera, contrainte `|lateral| <= profondeur * tan(demi-champ)` sur les deux axes, maximum retenu | `studio/Framing.fitDistance` (deplace au lot 3f) |
 | Champ de vision | impose a 60 degres pendant la prise de vue puis restaure : le reglage joueur (110 ici) deforme le sujet et rend le cadrage non reproductible | `studio/StudioHandlers` |
 | Position camera | vecteur de visee Minecraft depuis (yaw, pitch), recul depuis le centre | `studio/StudioHandlers` |
 | Angles | azimut relatif a l'orientation de la cible, 9 vues nommees plus tourne-disque | `studio/StudioAngles` |
@@ -264,6 +264,105 @@ Le vol en creatif a ete ecarte : le joueur resterait visible des autres joueurs 
 collisions, donc une camera placee dans un mur ne fonctionnerait pas. Le spectateur supprime en plus
 le modele du joueur de l'image et evite la commande de teleportation, le serveur acceptant la
 position annoncee par un spectateur.
+
+## Lot 3f : robustesse du socle (fait, verifie hors jeu)
+
+Revue d'architecture apres le lot 3e. Six defauts structurels, sans rapport avec une fonctionnalite
+manquante, mais qui se payent tot ou tard.
+
+| Defaut | Ce qui pouvait arriver | Correction |
+|---|---|---|
+| Aucune serialisation des actions | Deux captures en parallele (deux clients MCP branches, ou transport HTTP multi-session) se marchent dessus : la restauration de la premiere efface le reglage de la seconde | `RpcRouter.registerExclusive` et un verrou unique, refus en `busy` au-dela de `busyTimeoutMs` ; les lectures ne prennent pas le verrou |
+| Sequence « sortir et revenir » ecrite trois fois | Une correction appliquee a un seul des trois appelants, comme le garde-fou de chute ajoute a `vision.screenshot` mais pas a `studio.frameTarget` | `util/Excursion` en try-with-resources, utilise par les trois |
+| `frame_target` avec `returnToStart:false` | Le mode survie etait rendu a la position de la camera, souvent en l'air : le joueur tombait, exactement le bug corrige ailleurs | Regle inscrite dans `Excursion` : le mode n'est rendu que si la position l'a ete |
+| Aucun test automatise | Une erreur de signe dans le cadrage ou un offset dans le protocole RCON ne se voit qu'a l'oeil, sur une image, apres coup | 51 tests cote mod, 31 cote serveur MCP, tous sans Minecraft |
+| Contrat en double, rien pour le verifier | Une methode renommee d'un cote repond « Methode inconnue » au pire moment ; une centaine de parametres n'avaient pas de description | `scripts/check-contract.mjs`, et les descriptions ajoutees |
+| Artefacts du plugin versionnes, jamais reconstruits | Le plugin publie n'expose pas les tools qu'on vient d'ajouter, sans aucun message d'erreur | `scripts/check-plugin.mjs` compare le contenu du jar et du bundle aux sources ; `build-plugin.sh` teste avant et verifie apres |
+
+Deux corrections de surface au passage : cinq tools qui prennent le controle du client
+(`screenshot`, `capture_animation`, `screenshot_gui`, `compare_reference`, `compare_all_references`)
+s'annoncaient `readOnlyHint`, ce qui invitait le modele a les intercaler au milieu d'une prise de
+vue ; et la reflexion creait une poignee reutilisable pour n'importe quelle classe, y compris celles
+que la liste de blocage refuse de charger directement.
+
+### Verification en jeu le 2026-09-10
+
+Le socle a ete exerce sur le serveur de test, client Modrinth avec Sodium, Iris et Voxy, monde
+`clicker_spawn`.
+
+| Verification | Resultat |
+|---|---|
+| Deux actions exclusives en parallele | la seconde refusee en `busy` apres 30 s, message nommant `vision.burst` |
+| Lecture pendant une action de 48 s | `info.status` repond en 22 ms |
+| `frame_target` sur un mob ModelEngine (base invisible plus sept displays) | sujet isole sur fond uni, dichotomie convergee en cinq passes |
+| Restauration apres cadrage | position au bit pres, mode de jeu, champ de vision et focus rendus |
+| `frame_target` avec `returnToStart:false`, camera a 2 blocs du sol | joueur laisse en spectateur, aucune chute, aucun degat |
+| `server_status` et `server_command` | version Paper, joueurs, sortie des commandes |
+| `execute as @a at @s run say ...` avec `say` interdit | refuse par `CommandGuard` |
+| Journal client | aucun avertissement de mcbridge, seulement ceux d'Iris et Voxy |
+
+Deux defauts trouves a cette occasion, tous deux corriges et couverts par un test :
+
+- **Une teleportation par la console changeait la dimension du joueur.** La console execute depuis
+  l'overworld : `tp <joueur> x y z` a sorti le joueur de `clicker_spawn` pour le deposer aux memes
+  coordonnees dans l'overworld, sans erreur. Les commandes console passent desormais par
+  `minecraft:execute in <dimension> run ...` (`util/CommandLines`). Le chemin nominal ne l'avait pas
+  revele parce qu'en spectateur la camera se deplace cote client, sans commande.
+- **Un resultat de type tableau cassait la reponse MCP.** `structuredContent` n'accepte qu'un objet,
+  et le client rejetait alors toute la reponse : `reflect_get_field` sur une liste ne renvoyait rien
+  d'exploitable. Un tableau reste desormais dans le texte, sans partie structuree.
+
+Cote RCON, `blockedCommands` ne regardait que le premier mot : `execute as @a run stop` arretait le
+serveur sans jamais commencer par `stop`. `server/CommandGuard` extrait desormais toutes les tetes
+de commande d'une ligne. C'est un garde-fou contre l'accident, pas contre l'intention : qui a le mot
+de passe RCON a deja tous les droits.
+
+## Lot 3g : cout en tokens (en cours, verifie hors jeu)
+
+Mesure du 2026-09-10 sur les sessions passees : le poste dominant n'est pas la taille d'un
+resultat mais le nombre de tours, chaque appel MCP relisant tout le contexte accumule (385 K et
+520 K tokens de contexte median sur les deux longues sessions, pour 98 M et 350 M tokens relus).
+Deuxieme poste : ce qui reste dans le contexte, image ou JSON, refacture a chaque tour suivant.
+
+Fait :
+- `run_steps` : plusieurs tools en un appel, tous valides avant la premiere execution, arret a la
+  premiere erreur avec la liste de ce qui n'a pas tourne (`stopOnError=false` pour garantir un
+  `focus_clear` final). La boucle commande, attente, focus, capture, focus_clear passe de cinq
+  tours a un. Compose cote serveur MCP (`local: true` dans le catalogue), sans methode Java.
+- Resultats compacts : JSON sans indentation et flottants arrondis (trois decimales a partir de 1,
+  quatre chiffres significatifs en deca) dans `mcp-server/src/results.ts`. Mesure sur un resultat
+  reel de `frame_target` : 10 938 caracteres indentes, 5 885 compacts et arrondis.
+- `frame_target` renvoie un resume par defaut (`studio/StudioResult`, pur et teste) : cible,
+  nombre de parties, taille et centre mesures, et par vue le nom de l'angle, la camera reellement
+  utilisee apres reglage de la distance (nouveau champ `cameraUsed` du resultat complet), le
+  remplissage et l'image. `verbose:true` rend le plan complet avec les passes de reglage. La ligne
+  de texte par vue ne repete plus la camera. Sur le cas reel, le texte tombe d'environ 1 800 tokens
+  a moins de 300.
+- Image des differences (`Images.diff`) recadree sur `differenceBox` plus une marge, situee par
+  `diffCrop`, et reduite a `diffMaxWidth` (640 par defaut) ; omise sous `diffImageMinPercent`
+  (0,5 %, le bruit d'une scene vivante) avec la raison dans `diffImageOmitted`. De jusqu'a 1 843
+  tokens a quelques centaines, et rien du tout quand rien n'a change.
+- `compare_all_references` avec `includeDiffImages` mettait le base64 de chaque image dans le texte
+  JSON, soit des dizaines de milliers de tokens par reference : nouveau genre `diffs` cote serveur
+  MCP, une image par reference modifiee en bloc image.
+
+- `list_entities` replie les passagers d'une entite listee dans son entree (`passengerIds`,
+  `displayPassengers`, `foldedPassengers` au total) ; `groupPassengers:false` rend la liste plate.
+  Un mob ModelEngine, base plus displays, ne fait plus qu'une entree. Mesure sur un resultat reel :
+  14 entites deviennent 7 racines, 3 511 caracteres deviennent 1 831.
+- `screenshot` : `defaultMaxWidth` passe de 1280 a 960 dans la config du mod, soit 1 229 tokens a
+  691 par image en 16:9, refactures a chaque tour. Le fichier de config d'un client existant garde
+  son ancienne valeur : la changer a la main (fait sur le profil de test).
+
+Reste a faire, par impact decroissant :
+- `reflect_get_field` : plafonner le texte renvoye. 500 elements sur trois niveaux peuvent faire
+  30 K tokens d'un coup, pour toute la session.
+- Catalogue : 51 tools, environ 15 K tokens quand le client ne differe pas les tools (Claude Code
+  recent ne charge que les noms). Les cinq plus gros font un tiers du total ; raccourcir les
+  descriptions de parametres et sortir les options rares dans un objet `advanced`.
+
+Regle pour la suite : une image coute largeur x hauteur / 750 tokens, plafonnee a 1 568 px de grand
+cote ; le format et la qualite JPEG n'y changent rien.
 
 ## Lot 4 : rendu hors ecran
 

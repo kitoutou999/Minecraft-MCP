@@ -31,7 +31,7 @@ public final class FocusHandlers {
 	private FocusHandlers() {}
 
 	public static void register(RpcRouter router, EventBus events) {
-		router.register("focus.set", ctx -> {
+		router.registerExclusive("focus.set", ctx -> {
 			checkEnabled();
 			FocusState f = FocusState.INSTANCE;
 
@@ -87,7 +87,7 @@ public final class FocusHandlers {
 			return publish(events, refreshedStatus());
 		});
 
-		router.register("focus.region", ctx -> {
+		router.registerExclusive("focus.region", ctx -> {
 			checkEnabled();
 			FocusState f = FocusState.INSTANCE;
 			boolean hadRegion = f.isRegionActive();
@@ -109,7 +109,7 @@ public final class FocusHandlers {
 			return publish(events, status);
 		});
 
-		router.register("focus.clear", ctx -> {
+		router.registerExclusive("focus.clear", ctx -> {
 			boolean hadRegion = FocusState.INSTANCE.isRegionActive();
 			FocusState.INSTANCE.clear();
 			JsonObject status = FocusState.INSTANCE.toJson();

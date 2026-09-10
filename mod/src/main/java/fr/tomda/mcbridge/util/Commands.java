@@ -1,24 +1,26 @@
 package fr.tomda.mcbridge.util;
 
 import fr.tomda.mcbridge.McBridgeMod;
+import fr.tomda.mcbridge.bridge.MainThread;
 import fr.tomda.mcbridge.bridge.RpcException;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.phys.Vec3;
 
+
 /**
- * Envoi de commandes au serveur, limite en debit, et deplacement de camera econome en commandes.
+ * Envoi de commandes au serveur, par le canal le moins couteux disponible.
  *
- * <p>Un serveur Minecraft compte les commandes comme du spam : chaque envoi ajoute 20 a un compteur
- * qui ne diminue que d'une unite par tick, et depasser 200 deconnecte le joueur. Autrement dit, une
- * rafale de dix commandes suffit a se faire expulser, et le rythme tenable est de l'ordre d'une
- * commande par seconde. Les outils de ce mod en envoyaient bien plus vite : reglage de cadrage,
- * comparaison de references, changements de mode de jeu.
- *
- * <p>Deux reponses. D'abord {@link #send} espace les envois de {@code commandMinIntervalMs}.
- * Ensuite {@link #moveCamera} evite la commande quand c'est possible : en spectateur, le serveur
- * accepte la position que le client annonce, donc un deplacement direct suffit, et la commande ne
- * sert plus que de repli quand le serveur corrige la position.
+ * <p>Trois canaux, du meilleur au pire :
+ * <ol>
+ *   <li><b>Rien du tout</b> : en spectateur, le serveur accepte la position annoncee par le client,
+ *       donc deplacer la camera ne demande aucune commande.</li>
+ *   <li><b>RCON</b>, s'il est configure : la commande s'execute en tant que console, sans compteur
+ *       anti-spam, sans exiger que le compte soit operateur, et sa sortie revient. La console n'a
+ *       pas de « soi », donc chaque commande doit nommer le joueur au lieu d'utiliser {@code @s}.</li>
+ *   <li><b>Commande joueur</b> : le repli historique. Un serveur ajoute 20 a un compteur par envoi,
+ *       lequel ne retombe que d'une unite par tick et deconnecte a 200 : une rafale de dix
+ *       commandes suffit. D'ou l'intervalle minimal impose entre deux envois.</li>
+ * </ol>
  */
 public final class Commands {
 	private static final Object LOCK = new Object();
@@ -26,7 +28,41 @@ public final class Commands {
 
 	private Commands() {}
 
-	/** Envoie une commande en tant que joueur, en respectant l'intervalle minimal. */
+	/** Le canal effectivement utilise pour une action, renvoye dans les reponses. */
+	public enum Channel {
+		/** Deplacement applique cote client, sans rien envoyer. */
+		CLIENT,
+		/** Commande executee en tant que console. */
+		RCON,
+		/** Commande envoyee en tant que joueur. */
+		PLAYER
+	}
+
+	/** Nom de compte du joueur, seule facon de le designer depuis la console. */
+	public static String playerName() throws RpcException {
+		return ClientMc.call(() -> ClientMc.player().getGameProfile().name());
+	}
+
+	/**
+	 * Dimension courante du joueur, indispensable a toute commande passee par la console.
+	 *
+	 * <p>La console execute depuis l'overworld : sans cette precision, une teleportation RCON sort
+	 * le joueur de son monde et le depose aux memes coordonnees ailleurs. Constate en jeu sur un
+	 * monde personnalise.
+	 */
+	public static String dimension() throws RpcException {
+		return ClientMc.call(() -> ClientMc.player().level().dimension().identifier().toString());
+	}
+
+	// --- envoi brut ---------------------------------------------------------------------------
+
+    /**
+     * Envoie une commande en tant que joueur, en respectant l'intervalle minimal.
+     *
+     * <p>Reservee a ce qui doit venir du joueur, comme {@code chat.send}. Pour une action qui
+     * releve du serveur, preferer {@link #teleport} ou {@link #gamemode}, qui savent passer par
+     * RCON.
+     */
 	public static void send(String command) throws RpcException {
 		long wait;
 		synchronized (LOCK) {
@@ -50,19 +86,44 @@ public final class Commands {
 		});
 	}
 
+	// --- actions qui relevent du serveur --------------------------------------------------------
+
 	/**
-	 * Place la camera a une position et une orientation donnees.
+	 * Teleporte le joueur. {@code eyePosition} vise les yeux ; la commande, elle, place les pieds.
+	 */
+	public static Channel teleport(Vec3 eyePosition, float yaw, float pitch) throws RpcException {
+		double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
+		String cmd = McBridgeMod.config().teleportCommand;
+		double feetY = eyePosition.y - eyeHeight;
+		if (Rcon.available()) {
+			String line = CommandLines.teleportAsConsole(cmd, dimension(), playerName(),
+					eyePosition.x, feetY, eyePosition.z, yaw, pitch);
+			if (Rcon.tryRun(line) != null) return Channel.RCON;
+		}
+		send(CommandLines.teleportAsPlayer(cmd, eyePosition.x, feetY, eyePosition.z, yaw, pitch));
+		return Channel.PLAYER;
+	}
+
+	/** Change le mode de jeu du joueur. */
+	public static Channel gamemode(String mode) throws RpcException {
+		String cmd = McBridgeMod.config().gamemodeCommand;
+		if (Rcon.available() && Rcon.tryRun(CommandLines.gamemodeAsConsole(cmd, mode, playerName())) != null) {
+			return Channel.RCON;
+		}
+		send(CommandLines.gamemodeAsPlayer(cmd, mode));
+		return Channel.PLAYER;
+	}
+
+	// --- deplacement de camera ------------------------------------------------------------------
+
+	/**
+	 * Place la camera a une position et une orientation donnees, au meilleur canal disponible.
 	 *
 	 * <p>En spectateur, tente d'abord un deplacement cote client, sans aucune commande : le serveur
-	 * laisse les spectateurs se placer librement. La position obtenue est ensuite verifiee, et une
-	 * commande de teleportation prend le relais si le serveur a corrige le joueur. Hors spectateur,
-	 * passe directement par la commande, le serveur annulant tout deplacement client non valide.
-	 *
-	 * @param eyePosition position visee pour les yeux du joueur
-	 * @return {@code true} si le deplacement s'est fait sans commande
+	 * laisse les spectateurs se placer librement. La position obtenue est verifiee, et une
+	 * teleportation prend le relais si le serveur a corrige le joueur.
 	 */
-	public static boolean moveCamera(Vec3 eyePosition, float yaw, float pitch) throws Exception {
-		Minecraft mc = ClientMc.mc();
+	public static Channel moveCamera(Vec3 eyePosition, float yaw, float pitch) throws Exception {
 		boolean spectator = ClientMc.call(() -> ClientMc.player().isSpectator());
 		if (spectator && McBridgeMod.config().preferClientTeleport) {
 			double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
@@ -77,15 +138,10 @@ public final class Commands {
 				return null;
 			});
 			// Laisser au serveur le temps d'accepter ou de corriger avant de conclure.
-			fr.tomda.mcbridge.bridge.MainThread.await(TickWaiter.after(2), 3000);
+			MainThread.await(TickWaiter.after(2), 3000);
 			Vec3 actual = ClientMc.call(() -> ClientMc.player().getEyePosition());
-			if (actual.distanceTo(eyePosition) <= 0.5) return true;
+			if (actual.distanceTo(eyePosition) <= 0.5) return Channel.CLIENT;
 		}
-
-		double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
-		send(String.format(java.util.Locale.ROOT, "%s @s %.4f %.4f %.4f %.3f %.3f",
-				McBridgeMod.config().teleportCommand,
-				eyePosition.x, eyePosition.y - eyeHeight, eyePosition.z, yaw, pitch));
-		return false;
+		return teleport(eyePosition, yaw, pitch);
 	}
 }

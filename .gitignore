@@ -6,6 +6,8 @@ mod/.gradle/
 mod/build/
 mod/run/
 mod/bin/
+# Journaux ecrits par les taches Gradle (le mod journalise via slf4j des les tests)
+mod/logs/
 mod/.idea/
 *.iml
 *.class

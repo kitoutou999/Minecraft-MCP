@@ -55,7 +55,8 @@ for (const [g, tools] of groups) {
     const ro = t.annotations?.readOnlyHint ? "lecture" : "action";
     out.push(`### \`${t.name}\``);
     out.push("");
-    out.push(`Methode RPC \`${t.method}\`, ${ro}${t.kind === "image" ? ", renvoie une image" : ""}.`);
+    if (t.local) out.push("Compose par le serveur MCP, sans methode RPC dans le mod, action.");
+    else out.push(`Methode RPC \`${t.method}\`, ${ro}${t.kind === "image" ? ", renvoie une image" : ""}.`);
     out.push("");
     out.push(t.description);
     out.push("");

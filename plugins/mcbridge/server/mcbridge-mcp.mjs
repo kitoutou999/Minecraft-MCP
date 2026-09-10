@@ -23755,6 +23755,7 @@ var BridgeClient = class {
 // src/tools.ts
 var READ = { readOnlyHint: true };
 var WRITE = { destructiveHint: false };
+var CONTROLS_CLIENT = { readOnlyHint: false, destructiveHint: false, idempotentHint: true };
 var vec3 = () => ({
   x: external_exports.number().describe("Coordonnee X (est/ouest)."),
   y: external_exports.number().describe("Coordonnee Y (hauteur)."),
@@ -23829,11 +23830,11 @@ var TOOLS = [
       hideScreen: external_exports.boolean().optional().default(true).describe("Ne pas dessiner l'ecran ouvert (chat, menu Echap, inventaire, menu serveur) pendant la capture, sans le fermer ni rendre la souris au jeu."),
       closeScreen: external_exports.boolean().optional().default(false).describe("Fermer reellement l'ecran ouvert avant la capture (perd un inventaire ou un menu serveur ; rend la souris au jeu). Rarement utile, preferer hideScreen."),
       waitTicks: external_exports.number().int().min(1).max(600).optional().describe("Ticks a attendre avant la capture."),
-      maxWidth: external_exports.number().int().min(0).max(8192).optional().describe("Largeur max de l'image renvoyee (0 = native). Defaut : config du mod (1280)."),
+      maxWidth: external_exports.number().int().min(0).max(8192).optional().describe("Largeur max de l'image renvoyee (0 = native). Defaut : config du mod (960, environ 690 tokens en 16:9). 1280 coute 1230 tokens, a reserver a un detail fin."),
       format: external_exports.enum(["jpeg", "png"]).optional().describe("Format de sortie. Defaut : config du mod (jpeg)."),
       quality: external_exports.number().min(0.05).max(1).optional().describe("Qualite JPEG (defaut 0.85).")
     },
-    annotations: READ,
+    annotations: CONTROLS_CLIENT,
     kind: "image"
   },
   {
@@ -23843,7 +23844,7 @@ var TOOLS = [
     description: "Description textuelle de ce que vise le joueur (bloc avec face, ou entite) et des entites proches triees par distance, avec leur type, nom, position et si ce sont des entites display (ModelEngine, Nexo). Moins couteux qu'un screenshot.",
     inputSchema: {
       radius: external_exports.number().min(1).max(128).optional().default(32).describe("Rayon de recherche des entites."),
-      maxEntities: external_exports.number().int().min(1).max(500).optional().default(50)
+      maxEntities: external_exports.number().int().min(1).max(500).optional().default(50).describe("Nombre maximal d'entites listees (defaut 50), les plus proches d'abord.")
     },
     annotations: READ
   },
@@ -23859,12 +23860,12 @@ var TOOLS = [
       cellWidth: external_exports.number().int().min(64).max(1024).optional().default(320).describe("Largeur d'une vignette de la planche."),
       columns: external_exports.number().int().min(0).max(8).optional().default(0).describe("Colonnes de la planche (0 = grille la plus carree)."),
       maxWidth: external_exports.number().int().min(0).max(4096).optional().describe("Largeur de chaque image en mode 'frames'."),
-      hideHud: external_exports.boolean().optional().default(true),
-      hideScreen: external_exports.boolean().optional().default(true),
-      format: external_exports.enum(["jpeg", "png"]).optional().default("jpeg"),
-      quality: external_exports.number().min(0.05).max(1).optional()
+      hideHud: external_exports.boolean().optional().default(true).describe("Masquer l'interface pendant la serie (defaut true)."),
+      hideScreen: external_exports.boolean().optional().default(true).describe("Masquer l'ecran ouvert sans le fermer (defaut true)."),
+      format: external_exports.enum(["jpeg", "png"]).optional().default("jpeg").describe("'jpeg' (defaut, peu couteux en tokens) ou 'png' (fidele)."),
+      quality: external_exports.number().min(0.05).max(1).optional().describe("Qualite JPEG entre 0 et 1 (defaut 0.85). Sans effet en PNG.")
     },
-    annotations: READ,
+    annotations: CONTROLS_CLIENT,
     kind: "images"
   },
   // ===== references visuelles ==================================================================
@@ -23875,10 +23876,10 @@ var TOOLS = [
     description: "Capture une image et la range sous un nom, avec la recette exacte qui l'a produite : position et orientation de camera, champ de vision, options de scene. C'est la recette qui rend la comparaison possible plus tard. Mode 'world' (defaut) : la camera est celle du joueur au moment de l'appel, sauf si camera est fourni ; entierement reproductible. Mode 'gui' : le panneau de l'interface ouverte ; la comparaison exigera que le meme menu soit ouvert, ce que le mod ne peut pas provoquer pour un menu de plugin. A poser une fois sur chaque element a surveiller, avant de toucher au pack. Pour une reference fiable, isoler le sujet avec focus et masquer le decor avec scene : une scene vivante bouge d'une capture a l'autre.",
     inputSchema: {
       name: external_exports.string().describe("Nom court, lettres chiffres point tiret souligne."),
-      mode: external_exports.enum(["world", "gui"]).optional().default("world"),
+      mode: external_exports.enum(["world", "gui"]).optional().default("world").describe("'world' (defaut) memorise la position de camera et rejoue la vue ; 'gui' capture le panneau de l'ecran ouvert."),
       note: external_exports.string().optional().describe("A quoi sert cette reference, pour s'y retrouver plus tard."),
       camera: external_exports.object({ x: external_exports.number(), y: external_exports.number(), z: external_exports.number(), yaw: external_exports.number().optional(), pitch: external_exports.number().optional() }).optional().describe("Position des yeux de la camera. Par defaut celle du joueur."),
-      fov: external_exports.number().int().min(20).max(110).optional(),
+      fov: external_exports.number().int().min(20).max(110).optional().describe("Champ de vision impose a l'enregistrement et rejoue tel quel (defaut : celui du client)."),
       scene: external_exports.object({
         hideTerrain: external_exports.boolean().optional(),
         hideSky: external_exports.boolean().optional(),
@@ -23897,9 +23898,9 @@ var TOOLS = [
       }).optional().describe(
         "Entites a garder au rendu, memorisees dans la recette. Fortement conseille : sans isolation, un joueur qui passe dans le champ ou une entite qui bouge suffit a faire diverger la comparaison (environ 0,2 % de pixels de bruit mesures sur une scene vivante)."
       ),
-      hideHud: external_exports.boolean().optional().default(true),
-      waitTicks: external_exports.number().int().min(1).max(200).optional().default(6),
-      overwrite: external_exports.boolean().optional().default(false)
+      hideHud: external_exports.boolean().optional().default(true).describe("Masquer l'interface (defaut true). Memorise dans la recette."),
+      waitTicks: external_exports.number().int().min(1).max(200).optional().default(6).describe("Ticks d'attente avant la capture, le temps que chunks et modeles chargent (defaut 6, 20 = 1 s)."),
+      overwrite: external_exports.boolean().optional().default(false).describe("Remplacer une reference du meme nom (defaut false : l'appel echoue si elle existe).")
     },
     annotations: WRITE
   },
@@ -23907,13 +23908,15 @@ var TOOLS = [
     name: "compare_reference",
     method: "refs.compare",
     title: "Comparer une reference",
-    description: "Rejoue la recette d'une reference et compare le resultat a l'image enregistree, pixel par pixel. Renvoie la part de pixels differents, l'ecart maximal, la zone touchee, et une image ou les differences ressortent en magenta. Sert a repondre a 'est-ce que ma modification a casse ce modele'.",
+    description: "Rejoue la recette d'une reference et compare le resultat a l'image enregistree, pixel par pixel. Renvoie la part de pixels differents, l'ecart maximal, la zone touchee (differenceBox), et une image ou les differences ressortent en magenta, recadree sur la zone touchee avec une marge (diffCrop la situe dans le cadre) et reduite a diffMaxWidth. Sous diffImageMinPercent de pixels differents, l'image est omise : c'est le bruit d'une scene vivante, pas un changement. Sert a repondre a 'est-ce que ma modification a casse ce modele'.",
     inputSchema: {
-      name: external_exports.string(),
+      name: external_exports.string().describe("Nom de la reference a rejouer."),
       tolerance: external_exports.number().int().min(0).max(255).optional().default(8).describe("Ecart tolere par canal avant de compter un pixel comme different."),
-      includeDiffImage: external_exports.boolean().optional().default(true)
+      includeDiffImage: external_exports.boolean().optional().default(true).describe("Joindre l'image des differences, en magenta sur fond grise (defaut true)."),
+      diffMaxWidth: external_exports.number().int().min(0).max(4096).optional().default(640).describe("Largeur maximale de l'image des differences apres recadrage (defaut 640, 0 = taille de la reference)."),
+      diffImageMinPercent: external_exports.number().min(0).max(100).optional().default(0.5).describe("Part de pixels differents en dessous de laquelle l'image des differences n'est pas jointe (defaut 0,5 %, le bruit d'une scene vivante). 0 pour toujours la joindre.")
     },
-    annotations: READ,
+    annotations: CONTROLS_CLIENT,
     kind: "diff"
   },
   {
@@ -23922,13 +23925,15 @@ var TOOLS = [
     title: "Verifier toutes les references",
     description: "Rejoue toutes les references et renvoie un verdict chiffre pour chacune, sans image : c'est l'appel a faire apres reload_resource_pack pour savoir d'un coup ce qui a change visuellement. Relancer compare_reference sur celles qui ont bouge pour voir la difference. Chaque reference en mode 'world' deplace brievement le joueur puis le remet en place.",
     inputSchema: {
-      tolerance: external_exports.number().int().min(0).max(255).optional().default(8),
+      tolerance: external_exports.number().int().min(0).max(255).optional().default(8).describe("Ecart tolere par canal de couleur avant de compter un pixel comme different (0 a 255, defaut 8)."),
       changedThresholdPercent: external_exports.number().min(0).max(100).optional().default(0.5).describe(
         "Part de pixels differents a partir de laquelle une reference est declaree modifiee. Mesures sur une scene vivante : environ 0,2 % de bruit sans rien changer, contre 3 % pour une vraie difference. Baisser le seuil si les references isolent bien leur sujet."
       ),
-      includeDiffImages: external_exports.boolean().optional().default(false).describe("Joindre l'image des differences pour chaque reference modifiee. Couteux.")
+      includeDiffImages: external_exports.boolean().optional().default(false).describe("Joindre l'image des differences, recadree et reduite, pour chaque reference declaree modifiee. Une image par reference."),
+      diffMaxWidth: external_exports.number().int().min(0).max(4096).optional().default(640).describe("Largeur maximale de chaque image des differences (defaut 640).")
     },
-    annotations: READ
+    annotations: CONTROLS_CLIENT,
+    kind: "diffs"
   },
   {
     name: "list_references",
@@ -23943,7 +23948,7 @@ var TOOLS = [
     method: "refs.delete",
     title: "Supprimer une reference",
     description: "Supprime l'image et la recette d'une reference.",
-    inputSchema: { name: external_exports.string() },
+    inputSchema: { name: external_exports.string().describe("Nom de la reference a supprimer, image et recette comprises.") },
     annotations: { destructiveHint: true }
   },
   // ===== monde =================================================================================
@@ -23953,9 +23958,9 @@ var TOOLS = [
     title: "Lire un bloc",
     description: "Identifiant et proprietes du bloc a une position entiere, tel que le client le connait (chunk charge requis).",
     inputSchema: {
-      x: external_exports.number().int(),
-      y: external_exports.number().int(),
-      z: external_exports.number().int()
+      x: external_exports.number().int().describe("Coordonnee X entiere du bloc."),
+      y: external_exports.number().int().describe("Coordonnee Y entiere du bloc (hauteur)."),
+      z: external_exports.number().int().describe("Coordonnee Z entiere du bloc.")
     },
     annotations: READ
   },
@@ -23963,15 +23968,16 @@ var TOOLS = [
     name: "list_entities",
     method: "world.entitiesNearby",
     title: "Lister les entites proches",
-    description: "Entites chargees dans un rayon autour du joueur (ou d'un centre donne), triees par distance. Filtres : types (ex. ['zombie','minecraft:item_display']), includeDisplays, includePlayers, includeSelf. Sert a trouver l'UUID ou l'id d'une cible pour focus_entities et get_entity.",
+    description: "Entites chargees dans un rayon autour du joueur (ou d'un centre donne), triees par distance. Filtres : types (ex. ['zombie','minecraft:item_display']), includeDisplays, includePlayers, includeSelf. Sert a trouver l'UUID ou l'id d'une cible pour focus_entities, frame_target et get_entity. Les passagers d'une entite listee (os ModelEngine, montures) sont replies dans son entree : passengerIds et displayPassengers, le nombre de displays qu'elle porte ; cibler la base suffit, frame_target et focus_entities prennent ses displays avec elle. groupPassengers:false pour la liste plate.",
     inputSchema: {
-      radius: external_exports.number().min(1).max(256).optional().default(32),
+      radius: external_exports.number().min(1).max(256).optional().default(32).describe("Rayon de recherche en blocs (defaut 32, maximum 256)."),
       center: external_exports.object(vec3()).optional().describe("Centre de recherche (defaut : le joueur)."),
       types: external_exports.array(external_exports.string()).optional().describe("Types a garder, avec ou sans prefixe minecraft:."),
-      includeDisplays: external_exports.boolean().optional().default(true),
-      includePlayers: external_exports.boolean().optional().default(true),
-      includeSelf: external_exports.boolean().optional().default(false),
-      max: external_exports.number().int().min(1).max(1e3).optional().default(200)
+      includeDisplays: external_exports.boolean().optional().default(true).describe("Inclure les entites d'affichage, os ModelEngine et meubles Nexo compris (defaut true)."),
+      includePlayers: external_exports.boolean().optional().default(true).describe("Inclure les autres joueurs (defaut true)."),
+      includeSelf: external_exports.boolean().optional().default(false).describe("Inclure le joueur local (defaut false)."),
+      max: external_exports.number().int().min(1).max(1e3).optional().default(200).describe("Nombre maximal d'entites renvoyees, les plus proches d'abord (defaut 200)."),
+      groupPassengers: external_exports.boolean().optional().default(true).describe("Replier les passagers d'une entite listee dans son entree (defaut true) ; false pour lister chaque passager a part.")
     },
     annotations: READ
   },
@@ -23981,9 +23987,9 @@ var TOOLS = [
     title: "Detail d'une entite",
     description: "Detail d'une entite par uuid ou id : boite englobante (pour cadrer la camera), passagers, et entites display situees a moins de attachRadius (les os d'un modele ModelEngine, les parties d'un meuble Nexo).",
     inputSchema: {
-      uuid: external_exports.string().optional(),
+      uuid: external_exports.string().optional().describe("UUID de l'entite. Fournir uuid ou id."),
       id: external_exports.number().int().optional().describe("Id reseau de l'entite (change a chaque session)."),
-      attachRadius: external_exports.number().min(0).max(32).optional().default(4)
+      attachRadius: external_exports.number().min(0).max(32).optional().default(4).describe("Rayon en blocs ou chercher les displays attaches a l'entite (defaut 4).")
     },
     annotations: READ
   },
@@ -24008,7 +24014,7 @@ var TOOLS = [
     method: "chat.send",
     title: "Envoyer un message",
     description: "Envoie un message de chat en tant que joueur (un message commencant par / est traite comme commande).",
-    inputSchema: { message: external_exports.string() },
+    inputSchema: { message: external_exports.string().describe("Message a dire dans le chat public. Un message commencant par / partirait comme commande : utiliser send_command.") },
     annotations: WRITE
   },
   {
@@ -24016,7 +24022,7 @@ var TOOLS = [
     method: "chat.recent",
     title: "Lire le chat recent",
     description: "Derniers messages recus : chat des joueurs, messages systeme, retours de commandes.",
-    inputSchema: { limit: external_exports.number().int().min(1).max(500).optional().default(50) },
+    inputSchema: { limit: external_exports.number().int().min(1).max(500).optional().default(50).describe("Nombre de messages recents renvoyes (defaut 50).") },
     annotations: READ
   },
   {
@@ -24025,9 +24031,9 @@ var TOOLS = [
     title: "Lire les evenements",
     description: "Evenements recents du client : chat, system_message, join, disconnect, focus_changed, resources_reloaded. Passer sinceId (le lastId de l'appel precedent) pour ne recevoir que les nouveaux.",
     inputSchema: {
-      limit: external_exports.number().int().min(1).max(1e3).optional().default(100),
-      types: external_exports.array(external_exports.string()).optional(),
-      sinceId: external_exports.number().int().min(0).optional().default(0)
+      limit: external_exports.number().int().min(1).max(1e3).optional().default(100).describe("Nombre maximal d'evenements renvoyes (defaut 100)."),
+      types: external_exports.array(external_exports.string()).optional().describe("Types a garder : chat, system_message, join, disconnect, focus_changed, resources_reloaded."),
+      sinceId: external_exports.number().int().min(0).optional().default(0).describe("Ne renvoyer que les evenements d'identifiant superieur, pour une lecture incrementale.")
     },
     annotations: READ
   },
@@ -24046,11 +24052,11 @@ var TOOLS = [
     title: "Modifier les options client",
     description: "Modifie une ou plusieurs options : hideGui (HUD), fov (30-110), guiScale (0 = auto), renderDistance (2-64), gamma (0-1). Les options non fournies sont inchangees. Renvoie les nouvelles valeurs.",
     inputSchema: {
-      hideGui: external_exports.boolean().optional(),
-      fov: external_exports.number().int().min(30).max(110).optional(),
-      guiScale: external_exports.number().int().min(0).max(8).optional(),
-      renderDistance: external_exports.number().int().min(2).max(64).optional(),
-      gamma: external_exports.number().min(0).max(1).optional()
+      hideGui: external_exports.boolean().optional().describe("Masquer l'interface, comme la touche F1."),
+      fov: external_exports.number().int().min(30).max(110).optional().describe("Champ de vision vertical en degres (30 a 110)."),
+      guiScale: external_exports.number().int().min(0).max(8).optional().describe("Echelle de l'interface ; 0 vaut automatique."),
+      renderDistance: external_exports.number().int().min(2).max(64).optional().describe("Distance de rendu en chunks (2 a 32)."),
+      gamma: external_exports.number().min(0).max(1).optional().describe("Luminosite entre 0 et 1 ; au-dela de 1 le jeu eclaircit fortement les ombres.")
     },
     annotations: WRITE
   },
@@ -24068,10 +24074,10 @@ var TOOLS = [
     title: "Lire le log client",
     description: "Dernieres lignes de logs/latest.log du client, avec filtre regex optionnel et filtre de niveaux (ERROR, WARN, INFO). C'est la que remontent les erreurs de textures, modeles et shaders apres un rechargement.",
     inputSchema: {
-      lines: external_exports.number().int().min(1).max(2e3).optional().default(100),
+      lines: external_exports.number().int().min(1).max(2e3).optional().default(100).describe("Nombre de dernieres lignes lues (defaut 200). Le fichier peut faire plusieurs Mo."),
       filter: external_exports.string().optional().describe("Regex, insensible a la casse."),
       levels: external_exports.array(external_exports.string()).optional().describe("Ex. ['ERROR','WARN']."),
-      file: external_exports.string().optional().default("latest.log")
+      file: external_exports.string().optional().default("latest.log").describe("Nom du fichier dans logs/ (defaut latest.log).")
     },
     annotations: READ
   },
@@ -24080,8 +24086,27 @@ var TOOLS = [
     method: "game.waitTicks",
     title: "Attendre des ticks",
     description: "Attend N ticks client (20 = 1 seconde, max 600). Utile apres une commande qui fait apparaitre une entite ou charge des chunks.",
-    inputSchema: { ticks: external_exports.number().int().min(1).max(600).default(20) },
+    inputSchema: { ticks: external_exports.number().int().min(1).max(600).default(20).describe("Nombre de ticks a attendre, 20 ticks valant une seconde.") },
     annotations: READ
+  },
+  // ===== enchainement (compose cote serveur MCP) ===============================================
+  {
+    name: "run_steps",
+    method: "mcp.runSteps",
+    local: true,
+    title: "Enchainer plusieurs tools en un appel",
+    description: "Execute plusieurs tools du catalogue a la suite, en un seul aller-retour : chaque etape nomme un tool et ses arguments, exactement comme un appel direct. Toutes les etapes sont validees avant que la premiere ne parte, puis executees dans l'ordre, et les resultats reviennent dans le meme ordre, images comprises. A la premiere erreur, l'execution s'arrete et les etapes restantes sont nommees (stopOnError=false pour tout executer malgre tout, par exemple pour garantir un focus_clear final). A utiliser des que deux appels dependent l'un de l'autre : chaque appel separe coute un tour complet de conversation. Exemple : send_command (tp), wait_ticks, focus_entities, screenshot, focus_clear. run_steps ne peut pas s'appeler lui-meme.",
+    inputSchema: {
+      steps: external_exports.array(
+        external_exports.object({
+          tool: external_exports.string().describe("Nom d'un tool du catalogue, par exemple 'screenshot'."),
+          args: external_exports.record(external_exports.unknown()).optional().describe("Arguments du tool, avec le meme schema qu'un appel direct.")
+        })
+      ).min(1).max(20).describe("Etapes dans l'ordre d'execution, 20 au plus."),
+      stopOnError: external_exports.boolean().optional().default(true).describe("Arreter a la premiere etape en erreur (defaut), ou executer toutes les etapes.")
+    },
+    // Ni readOnly ni idempotent : la sequence porte les effets de chacune de ses etapes, click_slot compris.
+    annotations: { readOnlyHint: false }
   },
   // ===== focus =================================================================================
   {
@@ -24090,15 +24115,15 @@ var TOOLS = [
     title: "Isoler des entites au rendu",
     description: "Ne rend que les entites selectionnees (par uuids, ids ou types) et masque toutes les autres, sans toucher au serveur. Inclut par defaut les passagers et les entites display a moins de attachRadius (os ModelEngine, parties Nexo). Masque aussi le joueur (hideSelf) et toute entite qui contiendrait la camera (hideCameraOccluders). Fusion : les options absentes sont inchangees ; la scene (focus_scene) et la region (focus_region) sont independantes. Reste actif jusqu'a focus_clear.",
     inputSchema: {
-      uuids: external_exports.array(external_exports.string()).optional(),
-      ids: external_exports.array(external_exports.number().int()).optional(),
+      uuids: external_exports.array(external_exports.string()).optional().describe("UUID des entites a garder visibles."),
+      ids: external_exports.array(external_exports.number().int()).optional().describe("Identifiants numeriques d'entites a garder visibles."),
       types: external_exports.array(external_exports.string()).optional().describe("Ex. ['zombie'] ou ['minecraft:item_display']."),
       attachRadius: external_exports.number().min(0).max(32).optional().describe("Rayon d'attache des displays autour des entites selectionnees (defaut 4)."),
-      includePassengers: external_exports.boolean().optional(),
-      includeAttachedDisplays: external_exports.boolean().optional(),
-      hideOthers: external_exports.boolean().optional(),
-      hideSelf: external_exports.boolean().optional(),
-      hideCameraOccluders: external_exports.boolean().optional()
+      includePassengers: external_exports.boolean().optional().describe("Garder aussi les passagers et le vehicule de la cible (defaut true)."),
+      includeAttachedDisplays: external_exports.boolean().optional().describe("Garder les displays proches de la cible : sans eux, un modele ModelEngine ou Nexo disparait (defaut true)."),
+      hideOthers: external_exports.boolean().optional().describe("Masquer toutes les entites non selectionnees (defaut true)."),
+      hideSelf: external_exports.boolean().optional().describe("Masquer le joueur local (defaut true)."),
+      hideCameraOccluders: external_exports.boolean().optional().describe("Masquer une entite qui englobe la camera et boucherait la vue (defaut true).")
     },
     annotations: WRITE
   },
@@ -24111,12 +24136,12 @@ var TOOLS = [
       studio: external_exports.boolean().optional().describe("Raccourci : allume d'un coup terrain, ciel, particules, block entities, brouillard, overlay et eclairage plat. Les options explicites restent prioritaires."),
       hideTerrain: external_exports.boolean().optional().describe("Blocs, y compris le terrain lointain de Voxy."),
       hideSky: external_exports.boolean().optional().describe("Ciel, nuages et meteo."),
-      hideParticles: external_exports.boolean().optional(),
+      hideParticles: external_exports.boolean().optional().describe("Masquer les particules ; elles continuent d'exister, elles ne sont plus dessinees."),
       hideBlockEntities: external_exports.boolean().optional().describe("Panneaux, coffres, bannieres, tetes : ils sont dessines par une passe distincte du terrain et restent visibles sans cette option."),
       hideAllEntities: external_exports.boolean().optional().describe("Masquer toutes les entites, meme celles selectionnees par focus_entities : pour photographier un decor seul."),
-      disableFog: external_exports.boolean().optional(),
+      disableFog: external_exports.boolean().optional().describe("Supprimer le brouillard, sur les entites comme sur le terrain."),
       disableCameraClipping: external_exports.boolean().optional().describe("Empeche la camera de se rapprocher quand un bloc la gene, en troisieme personne."),
-      hideInsideBlockOverlay: external_exports.boolean().optional(),
+      hideInsideBlockOverlay: external_exports.boolean().optional().describe("Supprimer la texture plein ecran affichee quand la camera est dans un bloc."),
       flatLighting: external_exports.boolean().optional().describe("Eclairer les entites comme en plein jour, quelle que soit la lumiere reelle."),
       backgroundColor: external_exports.string().optional().describe("'#RRGGBB' ou 'none'.")
     },
@@ -24130,10 +24155,10 @@ var TOOLS = [
     inputSchema: {
       from: external_exports.object(vec3()).optional().describe("Premier coin (blocs)."),
       to: external_exports.object(vec3()).optional().describe("Coin oppose (blocs)."),
-      hideEntitiesOutside: external_exports.boolean().optional().default(true),
+      hideEntitiesOutside: external_exports.boolean().optional().default(true).describe("Masquer aussi les entites hors de la boite (defaut true)."),
       clear: external_exports.boolean().optional().default(false).describe("Retirer la region."),
-      waitForRebuild: external_exports.boolean().optional().default(true),
-      timeoutMs: external_exports.number().int().min(1e3).max(12e4).optional().default(2e4)
+      waitForRebuild: external_exports.boolean().optional().default(true).describe("Attendre la fin de la reconstruction des sections avant de repondre (defaut true) : sinon la capture suivante montrerait un terrain a moitie refait."),
+      timeoutMs: external_exports.number().int().min(1e3).max(12e4).optional().default(2e4).describe("Delai maximal d'attente de la reconstruction (defaut 20000).")
     },
     annotations: WRITE
   },
@@ -24143,7 +24168,7 @@ var TOOLS = [
     title: "Desactiver le focus",
     description: "Retablit le rendu normal : selection d'entites, scene et region. Reconstruit les sections si une region etait active.",
     inputSchema: {
-      waitForRebuild: external_exports.boolean().optional().default(true)
+      waitForRebuild: external_exports.boolean().optional().default(true).describe("Attendre la reconstruction du terrain avant de repondre (defaut true).")
     },
     annotations: WRITE
   },
@@ -24155,6 +24180,27 @@ var TOOLS = [
     inputSchema: {},
     annotations: READ
   },
+  // ===== serveur (RCON) ========================================================================
+  {
+    name: "server_status",
+    method: "server.status",
+    title: "Etat du serveur (RCON)",
+    description: "Dit si le canal RCON est configure et joignable, et si oui renvoie la version du serveur et les joueurs connectes. RCON est facultatif : sans lui tout fonctionne, mais les teleportations et changements de mode passent par des commandes envoyees en tant que joueur, avec les permissions et la limite anti-spam que cela implique. A appeler avant server_command pour savoir si le canal existe.",
+    inputSchema: {
+      includePlugins: external_exports.boolean().optional().default(false).describe("Joindre la liste des plugins du serveur. Sortie longue.")
+    },
+    annotations: READ
+  },
+  {
+    name: "server_command",
+    method: "server.command",
+    title: "Commande console (RCON)",
+    description: "Execute une commande sur le serveur en tant que console et RENVOIE SA SORTIE, ce qu'une commande envoyee en tant que joueur ne permet pas. C'est la porte vers tout ce que le client ignore : catalogue d'objets d'un plugin, liste de ses mobs, joueurs hors ligne, monde au-dela de la distance de rendu. Exemples selon les plugins installes : 'list', 'plugins', 'mm mobs list', 'nexo items', 'lp user <joueur> info'. Demande RCON configure : verifier avec server_status. Attention, la console a tous les droits et n'a pas de 'soi', donc pas de selecteur @s : nommer explicitement le joueur. Quelques commandes sont refusees par la configuration du mod, dont l'arret du serveur.",
+    inputSchema: {
+      command: external_exports.string().describe("Commande sans le slash initial.")
+    },
+    annotations: { destructiveHint: true }
+  },
   // ===== interfaces ============================================================================
   {
     name: "get_gui",
@@ -24163,7 +24209,7 @@ var TOOLS = [
     description: "Decrit l'ecran ouvert : nom, titre, position et taille du panneau, echelle de l'interface, et pour chaque case son numero, son rectangle a l'ecran et l'objet qu'elle contient (identifiant, quantite, nom affiche, nombre de lignes d'infobulle). Sans image, donc sans cout en tokens : a appeler avant toute capture d'interface pour choisir la case. Marche pour l'inventaire du joueur comme pour un menu ouvert par un plugin.",
     inputSchema: {
       includeEmpty: external_exports.boolean().optional().default(false).describe("Inclure les cases vides."),
-      includeTooltipLineCount: external_exports.boolean().optional().default(true)
+      includeTooltipLineCount: external_exports.boolean().optional().default(true).describe("Joindre le nombre de lignes d'infobulle de chaque case (defaut true), utile pour prevoir le decoupage.")
     },
     annotations: READ
   },
@@ -24173,7 +24219,7 @@ var TOOLS = [
     title: "Ouvrir l'inventaire du joueur",
     description: "Ouvre l'inventaire du joueur cote client, comme la touche E, et renvoie l'etat de l'interface. Un menu de plugin ne s'ouvre pas ainsi : lancer sa commande avec send_command, puis lire get_gui.",
     inputSchema: {
-      screen: external_exports.enum(["inventory"]).optional().default("inventory")
+      screen: external_exports.enum(["inventory"]).optional().default("inventory").describe("Seul 'inventory' est ouvrable par le mod ; un menu de plugin s'ouvre par sa commande serveur.")
     },
     annotations: WRITE
   },
@@ -24201,7 +24247,7 @@ var TOOLS = [
     title: "Survoler une case",
     description: "Place un curseur virtuel sur une case (ou aux coordonnees x, y de l'interface) pour afficher son infobulle a l'ecran. La souris reelle du joueur ne bouge pas. Le survol reste actif jusqu'a clear:true ou la fermeture de l'interface. Pour une simple capture, passer plutot hoverSlot a screenshot_gui, qui remet le curseur en etat ensuite.",
     inputSchema: {
-      slot: external_exports.number().int().min(0).optional(),
+      slot: external_exports.number().int().min(0).optional().describe("Numero de la case a survoler, tel que renvoye par get_gui. Omettre avec clear:true."),
       x: external_exports.number().optional().describe("Coordonnee X en unites d'interface."),
       y: external_exports.number().optional().describe("Coordonnee Y en unites d'interface."),
       clear: external_exports.boolean().optional().default(false).describe("Desactiver le curseur virtuel.")
@@ -24214,19 +24260,19 @@ var TOOLS = [
     title: "Photographier une interface",
     description: "Capture l'interface ouverte, avec decoupage. crop : 'gui' le panneau du menu (defaut), 'slot' une seule case (agrandie au plus proche voisin pour rester nette), 'tooltip' l'infobulle du survol, 'rect' une zone libre, 'none' tout l'ecran. hoverSlot affiche l'infobulle de la case pendant la capture puis remet le curseur en etat. Pour verifier un lore : hoverSlot avec crop 'tooltip'. Pour verifier une texture ou un modele : crop 'slot'. Le HUD est masque par defaut, l'interface reste visible. Format png par defaut, mieux adapte au texte et aux textures.",
     inputSchema: {
-      crop: external_exports.enum(["gui", "slot", "tooltip", "rect", "none"]).optional().default("gui"),
+      crop: external_exports.enum(["gui", "slot", "tooltip", "rect", "none"]).optional().default("gui").describe("Zone capturee : 'gui' le panneau (defaut), 'slot' une case, 'tooltip' l'infobulle survolee, 'rect' une zone donnee, 'none' tout l'ecran."),
       slot: external_exports.number().int().min(0).optional().describe("Case a decouper avec crop:'slot'."),
       hoverSlot: external_exports.number().int().min(0).optional().describe("Case a survoler pour afficher son infobulle."),
       rect: external_exports.object({ x: external_exports.number().int(), y: external_exports.number().int(), width: external_exports.number().int(), height: external_exports.number().int() }).optional().describe("Zone a decouper avec crop:'rect', en unites d'interface."),
       padding: external_exports.number().int().min(0).max(64).optional().describe("Marge autour du decoupage (defaut 2 pour une case, 6 sinon)."),
-      maxWidth: external_exports.number().int().min(0).max(4096).optional().default(900),
+      maxWidth: external_exports.number().int().min(0).max(4096).optional().default(900).describe("Largeur maximale de l'image renvoyee (defaut 900)."),
       minWidth: external_exports.number().int().min(0).max(2048).optional().describe("Largeur minimale : un decoupage etroit est agrandi (defaut 256 pour une case)."),
-      format: external_exports.enum(["png", "jpeg"]).optional().default("png"),
-      quality: external_exports.number().min(0.05).max(1).optional(),
-      hideHud: external_exports.boolean().optional().default(true),
-      waitTicks: external_exports.number().int().min(1).max(200).optional().default(3)
+      format: external_exports.enum(["png", "jpeg"]).optional().default("png").describe("'png' (defaut, fidele pour une texture) ou 'jpeg'."),
+      quality: external_exports.number().min(0.05).max(1).optional().describe("Qualite JPEG entre 0 et 1. Sans effet en PNG."),
+      hideHud: external_exports.boolean().optional().default(true).describe("Masquer le HUD du jeu derriere l'interface (defaut true)."),
+      waitTicks: external_exports.number().int().min(1).max(200).optional().default(3).describe("Ticks d'attente avant la capture, le temps que le survol s'affiche (defaut 3).")
     },
-    annotations: READ,
+    annotations: CONTROLS_CLIENT,
     kind: "image"
   },
   {
@@ -24248,15 +24294,15 @@ var TOOLS = [
     name: "frame_target",
     method: "studio.frameTarget",
     title: "Photographier une entite (studio)",
-    description: "Photographie une entite sous un ou plusieurs angles, tout seul : calcule le cadrage a partir de son encombrement (entite, passagers et displays attaches, donc un mob ModelEngine ou un meuble Nexo entier), passe le joueur en spectateur, le teleporte a la bonne distance pour chaque angle, isole la cible sur fond uni avec eclairage plein jour, capture, puis restaure le focus, le mode de jeu, le champ de vision et la position de depart. La distance est calculee par vue pour que la cible remplisse l'image sans etre coupee, en tenant compte du format de la fenetre. Cible par uuid, id, ou type (l'entite chargee la plus proche). Le cadrage se corrige tout seul : la premiere prise garantit que rien n'est coupe, puis le sujet est mesure sur le fond uni pour rapprocher la camera (refine) et rogner l'image (autoCrop). Si le resultat ne convient pas, jouer sur margin, ou fixer distance. studio_bounds montre la mesure retenue sans consommer d'image. angles : front, back, left, right, top, bottom, iso, iso_left, three_quarter (azimut relatif a l'orientation de la cible). turntable N produit N vues reparties sur 360 degres. Maximum 12 vues par appel, chacune renvoyee comme une image : commencer par une seule vue, et utiliser studio_bounds pour verifier un cadrage sans consommer d'images. Necessite la permission de /tp et /gamemode ; sans elle, l'appel echoue avant tout deplacement.",
+    description: "Photographie une entite sous un ou plusieurs angles, tout seul : calcule le cadrage a partir de son encombrement (entite, passagers et displays attaches, donc un mob ModelEngine ou un meuble Nexo entier), passe le joueur en spectateur, le teleporte a la bonne distance pour chaque angle, isole la cible sur fond uni avec eclairage plein jour, capture, puis restaure le focus, le mode de jeu, le champ de vision et la position de depart. La distance est calculee par vue pour que la cible remplisse l'image sans etre coupee, en tenant compte du format de la fenetre. Cible par uuid, id, ou type (l'entite chargee la plus proche). Le cadrage se corrige tout seul : la premiere prise garantit que rien n'est coupe, puis le sujet est mesure sur le fond uni pour rapprocher la camera (refine) et rogner l'image (autoCrop). Si le resultat ne convient pas, jouer sur margin, ou fixer distance. studio_bounds montre la mesure retenue sans consommer d'image. angles : front, back, left, right, top, bottom, iso, iso_left, three_quarter (azimut relatif a l'orientation de la cible). turntable N produit N vues reparties sur 360 degres. Maximum 12 vues par appel, chacune renvoyee comme une image : commencer par une seule vue, et utiliser studio_bounds pour verifier un cadrage sans consommer d'images. Necessite la permission de /tp et /gamemode ; sans elle, l'appel echoue avant tout deplacement. Le resultat est un resume : cible, taille mesuree, camera reelle et remplissage de chaque vue ; verbose:true renvoie le plan complet.",
     inputSchema: {
-      uuid: external_exports.string().optional(),
-      id: external_exports.number().int().optional(),
+      uuid: external_exports.string().optional().describe("UUID de la cible. Fournir uuid, id ou type."),
+      id: external_exports.number().int().optional().describe("Identifiant numerique de la cible. Fournir uuid, id ou type."),
       type: external_exports.string().optional().describe("Ex. 'item_display' ; prend l'entite chargee la plus proche."),
       angles: external_exports.array(external_exports.string()).optional().describe("Vues nommees. Defaut : ['front']."),
       customAngles: external_exports.array(external_exports.object({ azimuth: external_exports.number(), pitch: external_exports.number(), name: external_exports.string().optional() })).optional().describe("Angles explicites en degres, azimut relatif a la cible."),
       turntable: external_exports.number().int().min(0).max(12).optional().describe("Nombre de vues reparties sur 360 degres."),
-      turntablePitch: external_exports.number().min(-89).max(89).optional().default(15),
+      turntablePitch: external_exports.number().min(-89).max(89).optional().default(15).describe("Inclinaison des vues du tourne-disque en degres (defaut 15, positif = vue de dessus)."),
       absoluteAzimuth: external_exports.boolean().optional().default(false).describe("Interpreter l'azimut comme un yaw monde plutot que relatif a la cible."),
       attachRadius: external_exports.number().min(0).max(32).optional().default(4).describe("Rayon de prise en compte des displays attaches."),
       boundsSource: external_exports.enum(["auto", "culling", "hitbox"]).optional().default("auto").describe(
@@ -24274,9 +24320,10 @@ var TOOLS = [
       spectator: external_exports.boolean().optional().default(true).describe("Passer en spectateur pendant la prise de vue puis restaurer le mode precedent."),
       returnToStart: external_exports.boolean().optional().default(true).describe("Revenir a la position de depart a la fin."),
       waitTicks: external_exports.number().int().min(1).max(200).optional().default(6).describe("Ticks d'attente apres chaque deplacement (20 = 1 s)."),
-      maxWidth: external_exports.number().int().min(0).max(4096).optional().default(640),
-      format: external_exports.enum(["jpeg", "png"]).optional().default("jpeg"),
-      quality: external_exports.number().min(0.05).max(1).optional()
+      maxWidth: external_exports.number().int().min(0).max(4096).optional().default(640).describe("Largeur maximale de chaque image renvoyee (defaut 640)."),
+      format: external_exports.enum(["jpeg", "png"]).optional().default("jpeg").describe("'jpeg' (defaut) ou 'png' pour un rendu fidele."),
+      quality: external_exports.number().min(0.05).max(1).optional().describe("Qualite JPEG entre 0 et 1 (defaut 0.85). Sans effet en PNG."),
+      verbose: external_exports.boolean().optional().default(false).describe("Renvoyer le plan complet : boites de mesure, liste des parties, passes de reglage de la distance. Par defaut, un resume bien moins couteux en tokens.")
     },
     annotations: WRITE,
     kind: "images"
@@ -24287,19 +24334,19 @@ var TOOLS = [
     title: "Verifier un cadrage sans capturer",
     description: "Calcule l'encombrement d'une cible (boite englobante de l'entite, de ses passagers et des displays attaches, avec la liste des elements retenus) et les positions de camera pour les angles demandes, sans rien capturer, deplacer ni modifier. Memes parametres de cadrage que frame_target. A utiliser pour regler margin, distance et angles sans cout en images.",
     inputSchema: {
-      uuid: external_exports.string().optional(),
-      id: external_exports.number().int().optional(),
-      type: external_exports.string().optional(),
-      angles: external_exports.array(external_exports.string()).optional(),
-      customAngles: external_exports.array(external_exports.object({ azimuth: external_exports.number(), pitch: external_exports.number(), name: external_exports.string().optional() })).optional(),
-      turntable: external_exports.number().int().min(0).max(12).optional(),
-      turntablePitch: external_exports.number().min(-89).max(89).optional(),
-      absoluteAzimuth: external_exports.boolean().optional(),
-      attachRadius: external_exports.number().min(0).max(32).optional().default(4),
-      boundsSource: external_exports.enum(["auto", "culling", "hitbox"]).optional().default("auto"),
-      margin: external_exports.number().min(0.5).max(5).optional().default(1.15),
-      distance: external_exports.number().min(0.5).max(256).optional(),
-      fov: external_exports.number().min(20).max(110).optional()
+      uuid: external_exports.string().optional().describe("UUID de la cible. Fournir uuid, id ou type."),
+      id: external_exports.number().int().optional().describe("Identifiant numerique de la cible. Fournir uuid, id ou type."),
+      type: external_exports.string().optional().describe("Type d'entite ; la plus proche du joueur est retenue."),
+      angles: external_exports.array(external_exports.string()).optional().describe("Vues nommees : front, back, left, right, top, bottom, iso, iso_left, three_quarter."),
+      customAngles: external_exports.array(external_exports.object({ azimuth: external_exports.number(), pitch: external_exports.number(), name: external_exports.string().optional() })).optional().describe("Vues libres {azimuth, pitch, name?} en degres, azimut relatif a l'orientation de la cible."),
+      turntable: external_exports.number().int().min(0).max(12).optional().describe("Nombre de vues reparties sur un tour complet."),
+      turntablePitch: external_exports.number().min(-89).max(89).optional().describe("Inclinaison des vues du tourne-disque en degres (defaut 15)."),
+      absoluteAzimuth: external_exports.boolean().optional().describe("Traiter l'azimut comme un yaw du monde et non comme un angle relatif a la cible (defaut false)."),
+      attachRadius: external_exports.number().min(0).max(32).optional().default(4).describe("Rayon en blocs ou inclure les displays attaches dans la mesure du sujet (defaut 4)."),
+      boundsSource: external_exports.enum(["auto", "culling", "hitbox"]).optional().default("auto").describe("Mesure du sujet : 'auto' (defaut), 'culling' pour la taille declaree au rendu, 'hitbox' pour la boite de collision."),
+      margin: external_exports.number().min(0.5).max(5).optional().default(1.15).describe("Marge multiplicative autour du sujet (defaut 1.15) : au-dessus de 1, laisse de l'air."),
+      distance: external_exports.number().min(0.5).max(256).optional().describe("Distance de camera imposee en blocs, au lieu du calcul de cadrage."),
+      fov: external_exports.number().min(20).max(110).optional().describe("Champ de vision vertical en degres pour le calcul et la prise de vue (defaut 60).")
     },
     annotations: READ
   },
@@ -24310,9 +24357,9 @@ var TOOLS = [
     title: "Appeler une methode Java (client)",
     description: "Echappatoire : invoque n'importe quelle methode d'une classe autorisee sur le thread de rendu. Sans target, appel statique. Les objets non serialisables reviennent comme {__type:'object_ref', __id:'obj_N'} ; assignTo les stocke sous $nom. Exemple : className 'net.minecraft.client.Minecraft', methodName 'getInstance', assignTo 'mc'. Minecraft 26.x n'est pas obfusque, les noms sont ceux des sources Mojang. Utiliser get_class_info pour decouvrir une classe.",
     inputSchema: {
-      className: external_exports.string(),
-      methodName: external_exports.string(),
-      args: external_exports.array(reflectArg).optional().default([]),
+      className: external_exports.string().describe("Nom complet de la classe, par exemple net.minecraft.client.Minecraft."),
+      methodName: external_exports.string().describe("Nom de la methode a appeler."),
+      args: external_exports.array(reflectArg).optional().default([]).describe("Arguments, chacun {type, value}. Une valeur '$nom' ou 'obj_N' designe une variable ou une poignee."),
       target: external_exports.string().optional().describe("'$nom' ou 'obj_N' pour un appel d'instance."),
       assignTo: external_exports.string().optional().describe("Nom de variable ou stocker le resultat.")
     },
@@ -24324,10 +24371,10 @@ var TOOLS = [
     title: "Lire un champ Java (client)",
     description: "Lit un champ (statique sans target, d'instance avec target). Remonte la hierarchie des classes.",
     inputSchema: {
-      className: external_exports.string(),
-      fieldName: external_exports.string(),
-      target: external_exports.string().optional(),
-      assignTo: external_exports.string().optional()
+      className: external_exports.string().describe("Nom complet de la classe qui declare le champ."),
+      fieldName: external_exports.string().describe("Nom du champ, meme prive."),
+      target: external_exports.string().optional().describe("Instance a lire, '$nom' ou 'obj_N'. Omettre pour un champ statique."),
+      assignTo: external_exports.string().optional().describe("Stocke le resultat dans la variable $nom, reutilisable comme target.")
     },
     annotations: READ
   },
@@ -24337,11 +24384,11 @@ var TOOLS = [
     title: "Modifier un champ Java (client)",
     description: "Ecrit un champ. valueType precise le type Java de la valeur (defaut : type declare du champ).",
     inputSchema: {
-      className: external_exports.string(),
-      fieldName: external_exports.string(),
-      value: external_exports.unknown(),
-      valueType: external_exports.string().optional(),
-      target: external_exports.string().optional()
+      className: external_exports.string().describe("Nom complet de la classe qui declare le champ."),
+      fieldName: external_exports.string().describe("Nom du champ a modifier."),
+      value: external_exports.unknown().describe("Nouvelle valeur."),
+      valueType: external_exports.string().optional().describe("Type Java de la valeur (defaut : le type declare du champ)."),
+      target: external_exports.string().optional().describe("Instance a modifier, '$nom' ou 'obj_N'. Omettre pour un champ statique.")
     },
     annotations: WRITE
   },
@@ -24351,9 +24398,9 @@ var TOOLS = [
     title: "Instancier une classe Java (client)",
     description: "Construit un objet d'une classe autorisee, sur le thread de rendu.",
     inputSchema: {
-      className: external_exports.string(),
-      args: external_exports.array(reflectArg).optional().default([]),
-      assignTo: external_exports.string().optional()
+      className: external_exports.string().describe("Nom complet de la classe a instancier."),
+      args: external_exports.array(reflectArg).optional().default([]).describe("Arguments du constructeur, chacun {type, value}."),
+      assignTo: external_exports.string().optional().describe("Stocke l'instance creee dans la variable $nom.")
     },
     annotations: WRITE
   },
@@ -24363,8 +24410,8 @@ var TOOLS = [
     title: "Inspecter une classe Java",
     description: "Methodes et champs declares d'une classe (includeInherited pour les publics herites), avec filtre optionnel sur le nom.",
     inputSchema: {
-      className: external_exports.string(),
-      includeInherited: external_exports.boolean().optional().default(false),
+      className: external_exports.string().describe("Nom complet de la classe a inspecter."),
+      includeInherited: external_exports.boolean().optional().default(false).describe("Inclure les membres herites (defaut false : seulement ceux declares par la classe)."),
       filter: external_exports.string().optional().describe("Sous-chaine a chercher dans les noms.")
     },
     annotations: READ
@@ -24374,14 +24421,14 @@ var TOOLS = [
     method: "vars.get",
     title: "Lire une variable de reflexion",
     description: "Valeur serialisee d'une variable $nom stockee par assignTo.",
-    inputSchema: { name: external_exports.string() },
+    inputSchema: { name: external_exports.string().describe("Nom de la variable a lire, sans le $.") },
     annotations: READ
   },
   {
     name: "var_list",
     method: "vars.list",
     title: "Lister les variables de reflexion",
-    description: "Noms et classes des variables stockees.",
+    description: "Noms et classes Java de toutes les variables $nom creees par assignTo. Sert a savoir ce qui est encore disponible avant de chainer un appel de reflexion.",
     inputSchema: {},
     annotations: READ
   },
@@ -24389,8 +24436,8 @@ var TOOLS = [
     name: "var_delete",
     method: "vars.delete",
     title: "Supprimer une variable de reflexion",
-    description: "Supprime une variable $nom.",
-    inputSchema: { name: external_exports.string() },
+    description: "Supprime une variable $nom creee par assignTo. Les poignees obj_N, elles, s'effacent d'elles-memes quand la limite est atteinte.",
+    inputSchema: { name: external_exports.string().describe("Nom de la variable a supprimer, sans le $.") },
     annotations: WRITE
   },
   {
@@ -24403,11 +24450,24 @@ var TOOLS = [
   }
 ];
 
-// src/index.ts
-var PKG_VERSION = "0.1.0";
-var INSTRUCTIONS = "Pont vers un client Minecraft (Fabric 26.1.2) via le mod mcbridge. Appeler get_status en premier. Le mod ne controle que le client : rendu, camera, screenshots, focus, options, reflexion. Le serveur de jeu se pilote par commandes (send_command, en tant que joueur) ou par RCON hors de ce MCP. Pour photographier une entite precise, frame_target fait tout seul : cadrage, placement, fond uni, capture, restauration. Pour un objet d'inventaire : open_inventory ou la commande du menu, puis get_gui pour reperer la case, get_item_lore pour le texte exact, screenshot_gui pour l'image (crop 'slot' pour la texture, hoverSlot + crop 'tooltip' pour le lore). click_slot navigue dans un menu de plugin, mais envoie un vrai clic au serveur : verifier le lore de la case avant, ou utiliser dryRun. Pour juger un mouvement (animation, particules, transition), capture_animation remplace une image par une serie. Apres une modification du pack : reload_resource_pack puis compare_all_references pour savoir ce qui a change visuellement. Sinon, boucle manuelle : send_command (tp / gamemode spectator) -> wait_ticks -> focus_entities (+ focus_scene) -> screenshot -> focus_clear. Apres une modification de pack : reload_resource_pack -> get_client_log levels ERROR,WARN -> screenshot.";
-function log(...args) {
-  console.error("[mcbridge-mcp]", ...args);
+// src/results.ts
+function roundNumber(x) {
+  if (!Number.isFinite(x)) return x;
+  if (Number.isInteger(x)) return x === 0 ? 0 : x;
+  return Math.abs(x) >= 1 ? Math.round(x * 1e3) / 1e3 : Number(x.toPrecision(4));
+}
+function roundNumbers(value) {
+  if (typeof value === "number") return roundNumber(value);
+  if (Array.isArray(value)) return value.map(roundNumbers);
+  if (value !== null && typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = roundNumbers(v);
+    return out;
+  }
+  return value;
+}
+function compactJson(value) {
+  return JSON.stringify(roundNumbers(value));
 }
 function errorResult(err) {
   let text;
@@ -24415,27 +24475,35 @@ function errorResult(err) {
   else if (err instanceof BridgeError) {
     text = `Erreur du bridge [${err.code}] : ${err.message}`;
     if (err.data !== void 0) text += `
-${JSON.stringify(err.data)}`;
+${compactJson(err.data)}`;
   } else if (err instanceof Error) text = `Erreur : ${err.message}`;
   else text = `Erreur : ${String(err)}`;
   return { isError: true, content: [{ type: "text", text }] };
 }
 function jsonResult(result) {
   if (result === void 0 || result === null) return { content: [{ type: "text", text: "ok" }] };
-  const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-  const out = { content: [{ type: "text", text }] };
-  if (typeof result === "object") out.structuredContent = result;
+  if (typeof result === "string") return { content: [{ type: "text", text: result }] };
+  const rounded = roundNumbers(result);
+  const out = { content: [{ type: "text", text: JSON.stringify(rounded) }] };
+  if (typeof rounded === "object" && !Array.isArray(rounded)) {
+    out.structuredContent = rounded;
+  }
   return out;
+}
+function mimeOf(r) {
+  return r.mimeType ?? (r.format === "jpeg" ? "image/jpeg" : "image/png");
 }
 function imageResult(result) {
   const r = result;
   if (!r || typeof r.base64 !== "string") return errorResult(new Error("Le bridge n'a pas renvoye d'image."));
-  const mimeType = r.mimeType ?? (r.format === "jpeg" ? "image/jpeg" : "image/png");
-  const { base64: _omit, ...meta } = r;
+  const mimeType = mimeOf(r);
   return {
     content: [
       { type: "image", data: r.base64, mimeType },
-      { type: "text", text: `Capture ${r.width ?? "?"}x${r.height ?? "?"} ${mimeType}, ${r.bytes ?? "?"} octets. ${JSON.stringify(meta.capture ?? {})}` }
+      {
+        type: "text",
+        text: `Capture ${r.width ?? "?"}x${r.height ?? "?"} ${mimeType}, ${r.bytes ?? "?"} octets. ${compactJson(r.capture ?? {})}`
+      }
     ]
   };
 }
@@ -24447,29 +24515,145 @@ function imagesResult(result) {
   const content = [];
   for (const shot of shots) {
     if (typeof shot.base64 !== "string") continue;
-    const mimeType = shot.mimeType ?? (shot.format === "jpeg" ? "image/jpeg" : "image/png");
-    content.push({ type: "image", data: shot.base64, mimeType });
-    content.push({
-      type: "text",
-      text: `Vue ${shot.angle?.name ?? "?"} : ${shot.width ?? "?"}x${shot.height ?? "?"}, camera ${JSON.stringify(shot.camera ?? {})}`
-    });
+    content.push({ type: "image", data: shot.base64, mimeType: mimeOf(shot) });
+    const name = typeof shot.angle === "string" ? shot.angle : shot.angle?.name;
+    content.push({ type: "text", text: `Vue ${name ?? "?"} : ${shot.width ?? "?"}x${shot.height ?? "?"}` });
   }
-  const meta = { ...r, shots: shots.map(({ base64: _b, ...rest }) => rest) };
-  content.push({ type: "text", text: JSON.stringify(meta, null, 2) });
+  const meta = roundNumbers({ ...r, shots: shots.map(({ base64: _b, ...rest }) => rest) });
+  content.push({ type: "text", text: JSON.stringify(meta) });
   return { content, structuredContent: meta };
 }
 function diffResult(result) {
   const r = result;
-  const { diffBase64, ...meta } = r ?? {};
+  const { diffBase64, ...rest } = r ?? {};
+  const meta = roundNumbers(rest);
   const content = [];
   if (typeof diffBase64 === "string") {
     content.push({ type: "image", data: diffBase64, mimeType: r.diffMimeType ?? "image/png" });
     content.push({ type: "text", text: "Differences en magenta sur fond grise." });
   }
-  content.push({ type: "text", text: JSON.stringify(meta, null, 2) });
+  content.push({ type: "text", text: JSON.stringify(meta) });
   return { content, structuredContent: meta };
 }
+function diffsResult(result) {
+  const r = result;
+  const list = Array.isArray(r?.results) ? r.results : [];
+  if (list.length === 0) return jsonResult(result);
+  const content = [];
+  const stripped = list.map(({ diffBase64, ...rest }) => {
+    if (typeof diffBase64 === "string") {
+      content.push({ type: "image", data: diffBase64, mimeType: rest.diffMimeType ?? "image/png" });
+      content.push({ type: "text", text: `Reference ${rest.name ?? "?"} : differences en magenta sur fond grise.` });
+    }
+    return rest;
+  });
+  const meta = roundNumbers({ ...r, results: stripped });
+  content.push({ type: "text", text: JSON.stringify(meta) });
+  return { content, structuredContent: meta };
+}
+function convertResult(def, result) {
+  if (def.kind === "image") return imageResult(result);
+  if (def.kind === "images") return imagesResult(result);
+  if (def.kind === "diff") return diffResult(result);
+  if (def.kind === "diffs") return diffsResult(result);
+  return jsonResult(result);
+}
+
+// src/steps.ts
+var RUN_STEPS = "run_steps";
+function prepareSteps(tools, steps) {
+  const byName = new Map(tools.map((t) => [t.name, t]));
+  const errors = [];
+  const prepared = [];
+  steps.forEach((step, i) => {
+    const label = `etape ${i + 1} (${step.tool})`;
+    const def = byName.get(step.tool);
+    if (!def) {
+      errors.push(`${label} : tool inconnu`);
+      return;
+    }
+    if (def.local) {
+      errors.push(`${label} : ${RUN_STEPS} ne peut pas s'imbriquer dans ${RUN_STEPS}`);
+      return;
+    }
+    const parsed = external_exports.object(def.inputSchema).safeParse(step.args ?? {});
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((it) => (it.path.length > 0 ? `${it.path.join(".")} : ` : "") + it.message).join(", ");
+      errors.push(`${label} : ${issues}`);
+      return;
+    }
+    prepared.push({ def, args: parsed.data });
+  });
+  return errors.length > 0 ? { errors } : prepared;
+}
+function firstText(res) {
+  for (const block of res.content) if (block.type === "text") return block.text;
+  return void 0;
+}
+function labelled(label, blocks) {
+  if (blocks.length === 0) return [{ type: "text", text: `${label} : ok` }];
+  const [first, ...rest] = blocks;
+  if (first.type === "text") return [{ type: "text", text: `${label} : ${first.text}` }, ...rest];
+  return [{ type: "text", text: `${label} :` }, ...blocks];
+}
+async function runSteps(tools, args, invoke) {
+  const steps = Array.isArray(args.steps) ? args.steps : [];
+  const stopOnError = args.stopOnError !== false;
+  const prep = prepareSteps(tools, steps);
+  if (!Array.isArray(prep)) {
+    return { isError: true, content: [{ type: "text", text: `Aucune etape executee : ${prep.errors.join(" ; ")}.` }] };
+  }
+  const total = prep.length;
+  const content = [];
+  const summary = [];
+  const skipped = [];
+  let failed = 0;
+  for (let i = 0; i < total; i++) {
+    const step = prep[i];
+    const label = `Etape ${i + 1}/${total} ${step.def.name}`;
+    const res = await invoke(step.def, step.args);
+    if (!res.isError) {
+      summary.push({ tool: step.def.name, ok: true });
+      content.push(...labelled(label, res.content));
+      continue;
+    }
+    failed++;
+    const message = firstText(res) ?? "erreur sans message";
+    summary.push({ tool: step.def.name, ok: false, error: message });
+    let text = `${label} a echoue : ${message}`;
+    if (stopOnError && i < total - 1) {
+      skipped.push(...prep.slice(i + 1).map((s, j) => `${i + j + 2} ${s.def.name}`));
+      text += `
+Etapes non executees : ${skipped.join(", ")}.`;
+      content.push({ type: "text", text });
+      break;
+    }
+    content.push({ type: "text", text });
+  }
+  const structured = { total, executed: summary.length, failed, steps: summary };
+  if (skipped.length > 0) structured.skipped = skipped;
+  return { content, structuredContent: structured, ...failed > 0 ? { isError: true } : {} };
+}
+
+// src/index.ts
+var PKG_VERSION = "0.1.0";
+var INSTRUCTIONS = "Pont vers un client Minecraft (Fabric 26.1.2) via le mod mcbridge. Appeler get_status en premier. Le mod ne controle que le client : rendu, camera, screenshots, focus, options, reflexion. Le serveur de jeu se pilote par commandes (send_command, en tant que joueur) ou par RCON hors de ce MCP. Pour photographier une entite precise, frame_target fait tout seul : cadrage, placement, fond uni, capture, restauration. Pour un objet d'inventaire : open_inventory ou la commande du menu, puis get_gui pour reperer la case, get_item_lore pour le texte exact, screenshot_gui pour l'image (crop 'slot' pour la texture, hoverSlot + crop 'tooltip' pour le lore). click_slot navigue dans un menu de plugin, mais envoie un vrai clic au serveur : verifier le lore de la case avant, ou utiliser dryRun. Pour juger un mouvement (animation, particules, transition), capture_animation remplace une image par une serie. Apres une modification du pack : reload_resource_pack puis compare_all_references pour savoir ce qui a change visuellement. Le mod ne voit que ce que le client recoit ; server_command (si RCON est configure) ouvre ce que seul le serveur sait, avec la sortie des commandes. Sinon, la boucle manuelle tient en un seul appel run_steps : send_command (tp / gamemode spectator), wait_ticks, focus_entities (+ focus_scene), screenshot, focus_clear. Regle generale : des que deux appels dependent l'un de l'autre, les passer a run_steps ; chaque appel separe coute un tour complet de conversation. Apres une modification de pack, en un run_steps : reload_resource_pack, get_client_log (levels ERROR,WARN), screenshot.";
+function log(...args) {
+  console.error("[mcbridge-mcp]", ...args);
+}
 function registerTools(server, bridge) {
+  const invoke = async (def, args) => {
+    try {
+      const params = def.mapArgs ? def.mapArgs(args ?? {}) : args ?? {};
+      const result = await bridge.call(def.method, params);
+      return convertResult(def, result);
+    } catch (err) {
+      return errorResult(err);
+    }
+  };
+  const localHandlers = {
+    [RUN_STEPS]: (args) => runSteps(TOOLS, args ?? {}, invoke)
+  };
   for (const def of TOOLS) {
     const config2 = {
       title: def.title,
@@ -24477,18 +24661,14 @@ function registerTools(server, bridge) {
       inputSchema: def.inputSchema,
       ...def.annotations ? { annotations: def.annotations } : {}
     };
-    const handler = async (args) => {
-      try {
-        const params = def.mapArgs ? def.mapArgs(args ?? {}) : args ?? {};
-        const result = await bridge.call(def.method, params);
-        if (def.kind === "image") return imageResult(result);
-        if (def.kind === "images") return imagesResult(result);
-        if (def.kind === "diff") return diffResult(result);
-        return jsonResult(result);
-      } catch (err) {
-        return errorResult(err);
-      }
-    };
+    let handler;
+    if (def.local) {
+      const local = localHandlers[def.name];
+      if (!local) throw new Error(`tool compose sans handler cote serveur : ${def.name}`);
+      handler = local;
+    } else {
+      handler = (args) => invoke(def, args ?? {});
+    }
     server.registerTool(def.name, config2, handler);
   }
 }

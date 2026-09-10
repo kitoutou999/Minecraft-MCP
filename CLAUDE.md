@@ -25,15 +25,24 @@ Paper de test est dans `../ClickerServer` (26.1.2, RCON actif, voir `../Clicker/
 
 ```bash
 cd mod && ./gradlew build                 # compile le mod -> build/libs/mcbridge-<version>.jar
+cd mod && ./gradlew test                  # tests unitaires du mod, sans Minecraft (quelques secondes)
 cd mod && ./gradlew installMod            # copie dans ~/.minecraft/mods
 cd mcp-server && npm ci && npm run build  # compile le serveur MCP
-cd mcp-server && npm run smoke            # liste les tools et verifie la gestion d'erreur, sans Minecraft
+cd mcp-server && npm run verify           # tests + coherence du contrat + smoke, sans Minecraft
+node scripts/check-contract.mjs           # methodes Java <-> catalogue MCP (demande dist/ a jour)
 node scripts/gen-tools-doc.mjs > docs/TOOLS.md   # regenere la reference des tools depuis tools.ts
+scripts/build-plugin.sh                   # reconstruit les artefacts du plugin Claude Code
 scripts/rpc.sh <methode> '<params json>'  # appelle le bridge directement (Minecraft lance avec le mod)
 ```
 
-Il n'y a pas de test automatise contre un vrai client : apres une modification du mod, la
-verification passe par `installMod`, relance de Minecraft, puis `scripts/rpc.sh info.status`.
+**Avant de committer**, `cd mod && ./gradlew test` et `cd mcp-server && npm run verify` doivent
+passer, et `scripts/build-plugin.sh` doit avoir ete relance si le mod ou le serveur MCP a change :
+le plugin embarque un jar et un bundle qui ne se reconstruisent pas tout seuls, et un plugin publie
+avec des artefacts en retard n'expose pas les tools qu'on vient d'ajouter.
+
+Les tests ne couvrent que ce qui se calcule hors du jeu (cadrage, images, protocole RCON, filtres,
+serialisation des actions, catalogue). Le rendu, les mixins et les captures demandent un vrai
+client : `installMod`, relance de Minecraft, puis `scripts/rpc.sh info.status`.
 
 ## Verifier une API Minecraft avant de l'utiliser
 
@@ -67,15 +76,37 @@ Renommages connus vers 26.2 : `Minecraft.getMainRenderTarget()` devient
   rendu via `ClientMc.call(() -> ...)`. Les handlers sont appeles depuis des threads HTTP. Ne
   jamais bloquer le thread de rendu en attendant un future : recuperer le future sur le thread de
   rendu, l'attendre avec `MainThread.await` cote HTTP (voir `ResourceHandlers`).
+- **Exclusivite** : une methode qui prend le controle du client (camera, mode de jeu, focus, options
+  de rendu, interface) s'enregistre avec `router.registerExclusive`, jamais `register`. Le routeur
+  les serialise ; deux en parallele se marcheraient dessus et la restauration de la premiere
+  effacerait le reglage de la seconde. Une lecture garde `register` pour rester disponible pendant
+  une longue prise de vue. Le tool correspondant ne doit alors pas etre annonce `readOnlyHint` :
+  utiliser `CONTROLS_CLIENT` dans `tools.ts` (`check-contract.mjs` le verifie).
+- **Sortie du client** : tout handler qui deplace la camera, passe en spectateur, force le champ de
+  vision ou modifie le focus passe par `util/Excursion` en try-with-resources, plutot que de
+  reecrire la sequence releve / spectateur / restauration. Le mode de jeu n'est rendu que si la
+  position l'a ete : rendre la survie en plein vol fait tomber le joueur.
 - **Erreurs** : lever `RpcException` avec un code de `RpcException` (`bad_request`, `no_player`,
-  `unavailable`, `forbidden`, `not_found`, `timeout`, `internal`). Messages en francais, precis.
+  `unavailable`, `forbidden`, `not_found`, `timeout`, `busy`, `internal`). Messages en francais,
+  precis, avec ce qu'il faut faire pour s'en sortir.
 - **Pas de dependance externe** dans le mod : JDK (`HttpServer`, `ImageIO`), Gson (fourni par
   Minecraft), Fabric API. Pas de Java-WebSocket, pas de Netty direct.
 - **Nommage** : methodes RPC `espace.action` en camelCase (`vision.screenshot`), tools MCP en
-  snake_case (`screenshot`, `focus_entities`). Un tool = un handler.
+  snake_case (`screenshot`, `focus_entities`). Un tool = un handler, sauf un tool compose cote
+  serveur MCP (`local: true` dans `tools.ts`, comme `run_steps`) : pas de methode Java, un handler
+  dans `index.ts`.
+- **Cout en tokens** : le texte d'un resultat est relu par le modele a chaque tour suivant.
+  `mcp-server/src/results.ts` serialise en JSON compact avec les flottants arrondis : ne pas
+  reintroduire d'indentation, ne jamais repeter une image en texte, renvoyer par defaut le minimum
+  utile et le detail sur demande. Deux appels dependants se font en un `run_steps` : un tour de
+  moins vaut plus qu'un resultat plus court (voir `docs/ARCHITECTURE.md`, Cout en tokens).
 - **Config** : toute nouvelle capacite sensible a sa porte `enableXxx` dans `BridgeConfig`,
   verifiee dans le handler, exposee dans `info.status`.
 - **Commentaires et docs en francais**, identifiants en anglais. Pas de caractere tiret long.
+- **Calcul pur = test** : une geometrie, un format binaire, un filtre ou un traitement d'image se
+  place dans une classe sans dependance au jeu (`Framing`, `RconCodec`, `CommandGuard`,
+  `PackageFilter`, `Images`) et recoit un test dans `mod/src/test/java`. C'est la ou une erreur ne
+  se verrait autrement qu'a l'oeil, sur une image, apres coup.
 - **Rien d'irreversible cote client** sans restauration : un handler qui change une option
   (ex. `hideGui`) la restaure ou renvoie l'etat precedent.
 
@@ -86,10 +117,13 @@ Renommages connus vers 26.2 : `Minecraft.getMainRenderTarget()` devient
 2. Verifier les signatures Minecraft utilisees avec `javap` (section ci-dessus).
 3. `cd mod && ./gradlew build` doit passer.
 4. Entree dans `mcp-server/src/tools.ts` : `name`, `method`, `description` precise (prerequis,
-   effets, unites), `inputSchema` zod avec `.describe()` sur chaque parametre, `annotations`,
-   `kind: "image"` si le resultat contient `base64`.
-5. `npm run build && npm run smoke`, puis regenerer `docs/TOOLS.md`.
-6. Mettre a jour `docs/ROADMAP.md` si le tool cloture un item.
+   effets, unites), `inputSchema` zod avec `.describe()` sur **chaque** parametre, `annotations`
+   (`READ`, `WRITE`, ou `CONTROLS_CLIENT` si la methode est exclusive), `kind: "image"` si le
+   resultat contient `base64`. Un tool sans methode Java, compose cote serveur, porte `local: true`
+   et recoit son handler dans `index.ts`.
+5. `npm run verify` (tests, contrat, smoke), puis regenerer `docs/TOOLS.md`.
+6. Mettre a jour `docs/PROTOCOL.md` (table des methodes) et `docs/ROADMAP.md` si le tool cloture un
+   item, puis relancer `scripts/build-plugin.sh`.
 
 ## Ajouter un mixin (checklist)
 
@@ -157,6 +191,23 @@ Renommages connus vers 26.2 : `Minecraft.getMainRenderTarget()` devient
   leur propre passe d'extraction et leur propre option.
 - `logs/latest.log` peut faire plusieurs Mo : `logs.client` lit tout le fichier, garder `lines`
   raisonnable.
+- **RCON est facultatif et non chiffre** : mot de passe et commandes circulent en clair, donc
+  liaison locale ou tunnel. Il execute en tant que console, ce qui evite le compteur anti-spam et
+  rend la sortie des commandes, mais la console n'a pas de « soi » : pas de selecteur `@s`, il faut
+  nommer le joueur.
+- **La console n'a pas non plus de dimension** : elle execute depuis l'overworld. Une teleportation
+  RCON ecrite `tp <joueur> x y z` sort donc le joueur d'un monde personnalise et le depose aux
+  memes coordonnees dans l'overworld, sans erreur ni message. Toute commande console qui depend du
+  lieu passe par `minecraft:execute in <dimension> run ...`, comme le fait `util/CommandLines`.
+  Constate en jeu le 2026-09-10 sur le monde `clicker_spawn`.
+- **Le prefixe de namespace vaut aussi derriere un `execute`** : `execute in <dim> run tp ...` est
+  repris par EssentialsX, qui repond « Teleportation en cours » et applique son propre delai. C'est
+  `run minecraft:tp` qu'il faut ecrire. `CommandGuard` refuse les commandes de `blockedCommands` y compris derriere un
+  `execute ... run` ; c'est un garde-fou contre l'accident, pas contre l'intention.
+- **Les artefacts du plugin sont dans le depot** (`plugins/mcbridge/mod/*.jar` et
+  `server/mcbridge-mcp.mjs`) : un plugin Claude Code est copie tel quel, sans build. Ils ne se
+  regenerent pas seuls, d'ou `scripts/build-plugin.sh` avant tout commit qui touche au mod ou au
+  serveur MCP.
 
 ## References
 

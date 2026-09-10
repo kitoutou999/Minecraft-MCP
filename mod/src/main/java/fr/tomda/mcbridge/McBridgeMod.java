@@ -22,7 +22,9 @@ import fr.tomda.mcbridge.handlers.VisionHandlers;
 import fr.tomda.mcbridge.handlers.WorldHandlers;
 import fr.tomda.mcbridge.reflect.ReflectionHandlers;
 import fr.tomda.mcbridge.refs.RefHandlers;
+import fr.tomda.mcbridge.server.ServerHandlers;
 import fr.tomda.mcbridge.studio.StudioHandlers;
+import fr.tomda.mcbridge.util.Rcon;
 import fr.tomda.mcbridge.util.TickWaiter;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -41,15 +43,35 @@ import org.slf4j.LoggerFactory;
 public class McBridgeMod implements ClientModInitializer {
 	public static final String MOD_ID = "mcbridge";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
-	public static final String MOD_VERSION = FabricLoader.getInstance().getModContainer(MOD_ID)
-			.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("dev");
-	public static final String MC_VERSION = FabricLoader.getInstance().getModContainer("minecraft")
-			.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("unknown");
+	private static String modVersion;
+	private static String mcVersion;
 
 	private static BridgeConfig config;
 	private static RpcRouter router;
 	private static EventBus events;
 	private static HttpBridgeServer http;
+
+	/**
+	 * Version du mod, lue a la demande.
+	 *
+	 * <p>Lire {@link FabricLoader} au chargement de la classe rendrait tout test hors du jeu
+	 * impossible : l'initialisation statique echouerait avant meme d'atteindre le code teste.
+	 */
+	public static String modVersion() {
+		if (modVersion == null) {
+			modVersion = FabricLoader.getInstance().getModContainer(MOD_ID)
+					.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("dev");
+		}
+		return modVersion;
+	}
+
+	public static String mcVersion() {
+		if (mcVersion == null) {
+			mcVersion = FabricLoader.getInstance().getModContainer("minecraft")
+					.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("unknown");
+		}
+		return mcVersion;
+	}
 
 	public static BridgeConfig config() {
 		return config;
@@ -69,7 +91,7 @@ public class McBridgeMod implements ClientModInitializer {
 		SseHub sse = new SseHub();
 		events = new EventBus(sse);
 		ChatLog chat = new ChatLog();
-		router = new RpcRouter();
+		router = new RpcRouter(config.busyTimeoutMs);
 
 		TickWaiter.register();
 		ClientEvents.register(events, chat);
@@ -89,6 +111,7 @@ public class McBridgeMod implements ClientModInitializer {
 		GuiHandlers.register(router);
 		StudioHandlers.register(router);
 		RefHandlers.register(router);
+		ServerHandlers.register(router);
 		ReflectionHandlers.register(router, config.reflection);
 
 		http = new HttpBridgeServer(config, router, events, sse);
@@ -102,6 +125,7 @@ public class McBridgeMod implements ClientModInitializer {
 
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
 			if (http != null) http.stop();
+			Rcon.shutdown();
 		});
 	}
 }

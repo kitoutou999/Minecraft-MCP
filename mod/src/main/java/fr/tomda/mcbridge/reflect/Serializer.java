@@ -29,13 +29,20 @@ import java.util.Optional;
  * ItemStack, Entity, Component, Identifier, AABB) deviennent du JSON lisible. Tout le reste
  * devient une reference opaque {@code {"__type":"object_ref","__id":"obj_N","__class":...}}
  * reutilisable comme {@code target} ou comme valeur d'argument.
+ *
+ * <p>Une poignee n'est creee que pour une classe autorisee par {@link PackageFilter}. Sans cela,
+ * une methode autorisee renvoyant par exemple un {@code ProcessBuilder} donnerait prise sur lui
+ * alors que la liste de blocage refuse de le charger directement. La valeur est alors decrite par
+ * sa seule classe, sans poignee reutilisable.
  */
 public final class Serializer {
 	private static final int MAX_COLLECTION = 500;
 	private final ObjectRegistry registry;
+	private final PackageFilter filter;
 
-	public Serializer(ObjectRegistry registry) {
+	public Serializer(ObjectRegistry registry, PackageFilter filter) {
 		this.registry = registry;
+		this.filter = filter;
 	}
 
 	public JsonElement serialize(Object value) {
@@ -110,11 +117,19 @@ public final class Serializer {
 	}
 
 	private JsonObject ref(Object value) {
-		String id = registry.store(value);
+		String className = value.getClass().getName();
 		JsonObject r = new JsonObject();
 		r.addProperty("__type", "object_ref");
-		r.addProperty("__id", id);
-		r.addProperty("__class", value.getClass().getName());
+		r.addProperty("__class", className);
+		if (!filter.isAllowed(className)) {
+			// Pas de poignee : la garder permettrait d'appeler ensuite des methodes sur un objet dont
+			// la classe est justement hors de la liste d'autorisation.
+			r.addProperty("__stored", false);
+			r.addProperty("__reason", "Classe hors liste d'autorisation : la valeur est decrite mais aucune poignee "
+					+ "reutilisable n'est creee. Ajuster reflection.allowedPackages dans mcbridge.json si besoin.");
+			return r;
+		}
+		r.addProperty("__id", registry.store(value));
 		return r;
 	}
 

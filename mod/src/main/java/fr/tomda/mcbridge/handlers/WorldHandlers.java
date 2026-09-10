@@ -56,6 +56,7 @@ public final class WorldHandlers {
 			boolean includeDisplays = ctx.optBoolean("includeDisplays", true);
 			boolean includePlayers = ctx.optBoolean("includePlayers", true);
 			boolean includeSelf = ctx.optBoolean("includeSelf", false);
+			boolean groupPassengers = ctx.optBoolean("groupPassengers", true);
 			Set<String> types = new HashSet<>();
 			JsonArray typesArr = ctx.optArray("types");
 			if (typesArr != null) typesArr.forEach(t -> types.add(normalizeType(t.getAsString())));
@@ -74,11 +75,38 @@ public final class WorldHandlers {
 				found.add(e);
 			}
 			found.sort((a, b) -> Double.compare(a.distanceToSqr(center), b.distanceToSqr(center)));
+
+			// Un mob ModelEngine est une entite de base plus ses displays passagers : les lister un par
+			// un repete huit fois la meme position pour un seul sujet, et remplit la liste. Les passagers
+			// d'une entite deja listee sont replies dans son entree (passengerIds, displayPassengers) ;
+			// un passager dont la monture n'est pas listee (filtree, hors rayon) reste visible.
+			Set<Integer> listed = new HashSet<>();
+			for (Entity e : found) listed.add(e.getId());
+			List<Entity> roots = new ArrayList<>();
+			int folded = 0;
+			for (Entity e : found) {
+				Entity vehicle = e.getVehicle();
+				if (groupPassengers && vehicle != null && listed.contains(vehicle.getId())) {
+					folded++;
+					continue;
+				}
+				roots.add(e);
+			}
 			JsonArray arr = new JsonArray();
-			for (int i = 0; i < found.size() && i < max; i++) arr.add(EntityJson.summary(found.get(i), center));
+			for (int i = 0; i < roots.size() && i < max; i++) {
+				Entity e = roots.get(i);
+				JsonObject summary = EntityJson.summary(e, center);
+				if (groupPassengers) {
+					int displays = 0;
+					for (Entity pe : e.getPassengers()) if (EntityJson.isDisplay(pe)) displays++;
+					if (displays > 0) summary.addProperty("displayPassengers", displays);
+				}
+				arr.add(summary);
+			}
 			JsonObject o = new JsonObject();
 			o.add("center", Json.vec(center));
-			o.addProperty("total", found.size());
+			o.addProperty("total", roots.size());
+			if (folded > 0) o.addProperty("foldedPassengers", folded);
 			o.add("entities", arr);
 			return o;
 		}));

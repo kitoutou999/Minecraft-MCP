@@ -13,8 +13,8 @@ import fr.tomda.mcbridge.util.CaptureState;
 import fr.tomda.mcbridge.util.ClientMc;
 import fr.tomda.mcbridge.util.Commands;
 import fr.tomda.mcbridge.util.EntityJson;
+import fr.tomda.mcbridge.util.Excursion;
 import fr.tomda.mcbridge.util.Images;
-import fr.tomda.mcbridge.util.Spectator;
 import fr.tomda.mcbridge.util.TickWaiter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
@@ -52,9 +52,9 @@ public final class VisionHandlers {
 	private VisionHandlers() {}
 
 	public static void register(RpcRouter router) {
-		router.register("vision.screenshot", VisionHandlers::screenshot);
+		router.registerExclusive("vision.screenshot", VisionHandlers::screenshot);
 
-		router.register("vision.burst", VisionHandlers::burst);
+		router.registerExclusive("vision.burst", VisionHandlers::burst);
 
 		router.register("vision.describeScene", ctx -> ClientMc.call(() -> {
 			LocalPlayer p = ClientMc.player();
@@ -241,31 +241,23 @@ public final class VisionHandlers {
 		}
 
 		// Deplacement avant la capture. Le spectateur evite la chute, et permet au passage de placer
-		// la camera sans envoyer la moindre commande.
-		Spectator.Guard guard = null;
-		Vec3 startPos = null;
-		float startYaw = 0;
-		float startPitch = 0;
+		// la camera sans envoyer la moindre commande. Le mode de jeu n'est rendu que si le joueur
+		// revient a son point de depart : le rendre en plein vol le ferait tomber.
+		Excursion excursion = null;
 		if (teleport != null) {
-			Object[] before = ClientMc.call(() -> {
-				LocalPlayer p = ClientMc.player();
-				return new Object[]{p.position(), p.getYRot(), p.getXRot()};
-			});
-			startPos = (Vec3) before[0];
-			startYaw = (float) before[1];
-			startPitch = (float) before[2];
-
-			if (stabilize) guard = Spectator.enter();
-
-			double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
-			float tpYaw = teleport.has("yaw") ? teleport.get("yaw").getAsFloat() : startYaw;
-			float tpPitch = teleport.has("pitch") ? teleport.get("pitch").getAsFloat() : startPitch;
+			excursion = Excursion.begin(Excursion.options()
+					.spectator(stabilize)
+					.restorePosition(returnToStart)
+					.restoreMode(returnToStart));
+			float tpYaw = teleport.has("yaw") ? teleport.get("yaw").getAsFloat() : excursion.startYaw();
+			float tpPitch = teleport.has("pitch") ? teleport.get("pitch").getAsFloat() : excursion.startPitch();
 			// Le parametre designe les pieds du joueur, comme une commande de teleportation.
 			Vec3 eye = new Vec3(teleport.get("x").getAsDouble(),
-					teleport.get("y").getAsDouble() + eyeHeight,
+					teleport.get("y").getAsDouble() + excursion.eyeHeight(),
 					teleport.get("z").getAsDouble());
 			Commands.moveCamera(eye, tpYaw, tpPitch);
 		}
+		try {
 		String[] screenOpen = new String[1];
 		ClientMc.call(() -> {
 			LocalPlayer p = ClientMc.player();
@@ -296,17 +288,16 @@ public final class VisionHandlers {
 
 		// Retour au point de depart si demande. Sinon le joueur reste sur place, et reste en
 		// spectateur quand il a fallu l'y mettre : le remettre en survie en l'air le ferait tomber,
-		// ce que ce garde-fou existe justement pour eviter.
+		// ce que ce garde-fou existe justement pour eviter. Ferme ici, avant de rendre compte, pour
+		// que la reponse decrive l'etat final ; le finally ne fera rien de plus.
 		boolean returned = false;
-		if (teleport != null && returnToStart) {
-			double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
-			Commands.moveCamera(startPos.add(0, eyeHeight, 0), startYaw, startPitch);
-			Spectator.restore(guard);
-			returned = true;
+		if (excursion != null) {
+			excursion.close();
+			returned = returnToStart;
 		}
 
 		final boolean hidden = hideScreen;
-		final Spectator.Guard finalGuard = guard;
+		final Excursion finalExcursion = excursion;
 		final boolean finalReturned = returned;
 		JsonObject meta = new JsonObject();
 		meta.add("playerPos", Json.vec(shotPos));
@@ -317,12 +308,16 @@ public final class VisionHandlers {
 		meta.addProperty("hudHidden", hideHud);
 		meta.addProperty("screenOpen", screenOpen[0]);
 		meta.addProperty("screenHidden", screenOpen[0] != null && hidden);
-		if (finalGuard != null && finalGuard.changed()) {
+		if (finalExcursion != null && finalExcursion.spectatorApplied()) {
 			meta.addProperty("switchedToSpectator", true);
-			meta.addProperty("previousGameMode", finalGuard.previousMode());
+			meta.addProperty("previousGameMode", finalExcursion.startMode());
 		}
 		if (teleport != null) meta.addProperty("returnedToStart", finalReturned);
 		image.add("capture", meta);
 		return image;
+		} finally {
+			// Idempotent : si la capture a echoue avant la fermeture ci-dessus, tout est rendu ici.
+			if (excursion != null) excursion.close();
+		}
 	}
 }

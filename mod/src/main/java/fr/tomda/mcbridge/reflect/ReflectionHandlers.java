@@ -35,8 +35,8 @@ public final class ReflectionHandlers {
 
 	private ReflectionHandlers(BridgeConfig.Reflection cfg) {
 		this.registry = new ObjectRegistry(cfg.maxObjectRefs);
-		this.serializer = new Serializer(registry);
 		this.filter = new PackageFilter(cfg.allowedPackages, cfg.blockedPackages);
+		this.serializer = new Serializer(registry, filter);
 	}
 
 	public static void register(RpcRouter router, BridgeConfig.Reflection cfg) {

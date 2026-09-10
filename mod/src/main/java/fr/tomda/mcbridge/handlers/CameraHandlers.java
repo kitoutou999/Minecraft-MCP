@@ -34,7 +34,7 @@ public final class CameraHandlers {
 			return o;
 		}));
 
-		router.register("camera.look", ctx -> ClientMc.call(() -> {
+		router.registerExclusive("camera.look", ctx -> ClientMc.call(() -> {
 			LocalPlayer p = ClientMc.player();
 			float yaw = p.getYRot();
 			float pitch = p.getXRot();
@@ -46,7 +46,7 @@ public final class CameraHandlers {
 			return look(p);
 		}));
 
-		router.register("camera.lookAt", ctx -> ClientMc.call(() -> {
+		router.registerExclusive("camera.lookAt", ctx -> ClientMc.call(() -> {
 			LocalPlayer p = ClientMc.player();
 			double dx = ctx.getDouble("x") - p.getX();
 			double dy = ctx.getDouble("y") - p.getEyeY();

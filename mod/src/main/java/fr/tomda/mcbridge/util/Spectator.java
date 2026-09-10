@@ -37,13 +37,14 @@ public final class Spectator {
 	public static Guard enter() throws Exception {
 		String mode = currentMode();
 		if ("spectator".equals(mode)) return new Guard(mode, false);
-		Commands.send(McBridgeMod.config().gamemodeCommand + " spectator");
+		Commands.gamemode("spectator");
 		MainThread.await(TickWaiter.after(4), 4000);
 		String now = currentMode();
 		if (!"spectator".equals(now)) {
 			throw RpcException.forbidden("Passage en spectateur refuse par le serveur (mode actuel : " + now
 					+ "). Sans lui, un joueur teleporte en l'air tombe. Donner la permission au joueur, se mettre en "
-					+ "spectateur a la main, ou accepter la chute avec stabilize:false.");
+					+ "spectateur a la main, ou renoncer au garde-fou avec l'option de l'outil (stabilize pour une "
+					+ "capture, spectator pour un cadrage).");
 		}
 		return new Guard(mode, true);
 	}
@@ -52,7 +53,7 @@ public final class Spectator {
 	public static void restore(Guard guard) {
 		if (guard == null || !guard.changed() || "unknown".equals(guard.previousMode())) return;
 		try {
-			Commands.send(McBridgeMod.config().gamemodeCommand + " " + guard.previousMode());
+			Commands.gamemode(guard.previousMode());
 		} catch (Exception e) {
 			McBridgeMod.LOGGER.warn("[mcbridge] retour au mode de jeu '{}' impossible", guard.previousMode(), e);
 		}

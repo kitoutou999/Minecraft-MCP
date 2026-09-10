@@ -20,7 +20,7 @@ public final class ChatHandlers {
 	private ChatHandlers() {}
 
 	public static void register(RpcRouter router, ChatLog chat) {
-		router.register("chat.send", ctx -> {
+		router.registerExclusive("chat.send", ctx -> {
 			String message = ctx.getString("message");
 			boolean isCommand = message.startsWith("/");
 			// Forcer l'implementation vanilla d'une commande reprise par un plugin (EssentialsX

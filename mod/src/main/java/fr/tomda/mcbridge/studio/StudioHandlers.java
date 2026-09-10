@@ -15,6 +15,7 @@ import fr.tomda.mcbridge.handlers.WorldHandlers;
 import fr.tomda.mcbridge.util.ClientMc;
 import fr.tomda.mcbridge.util.Commands;
 import fr.tomda.mcbridge.util.EntityJson;
+import fr.tomda.mcbridge.util.Excursion;
 import fr.tomda.mcbridge.util.Images;
 import fr.tomda.mcbridge.util.TickWaiter;
 import net.minecraft.client.Minecraft;
@@ -65,7 +66,7 @@ public final class StudioHandlers {
 			o.addProperty("captured", false);
 			return o;
 		});
-		router.register("studio.frameTarget", StudioHandlers::frameTarget);
+		router.registerExclusive("studio.frameTarget", StudioHandlers::frameTarget);
 	}
 
 	// --- planification ---------------------------------------------------------------------------
@@ -168,11 +169,12 @@ public final class StudioHandlers {
 
 		List<Shot> shots = new ArrayList<>();
 		for (StudioAngles a : angles) {
-			float yaw = (float) wrapDegrees(absolute ? a.azimuth() : bounds.targetYaw() + 180.0 + a.azimuth());
+			float yaw = (float) Framing.wrapDegrees(absolute ? a.azimuth() : bounds.targetYaw() + 180.0 + a.azimuth());
 			float pitch = (float) Math.max(-89.9, Math.min(89.9, a.pitch()));
-			double distance = fixedDistance != null ? fixedDistance : fitDistance(bounds, yaw, pitch, fov, aspect, margin);
+			double distance = fixedDistance != null ? fixedDistance
+					: Framing.fitDistance(bounds.box(), bounds.center(), yaw, pitch, fov, aspect, margin);
 			distance = Math.max(0.5, Math.min(distance, 256));
-			Vec3 look = lookVector(yaw, pitch);
+			Vec3 look = Framing.lookVector(yaw, pitch);
 			Vec3 pos = bounds.center().subtract(look.scale(distance));
 			shots.add(new Shot(a, pos, yaw, pitch, distance));
 		}
@@ -201,60 +203,6 @@ public final class StudioHandlers {
 		return best;
 	}
 
-	/** Vecteur de visee Minecraft pour un couple (yaw, pitch) en degres. */
-	private static Vec3 lookVector(double yawDeg, double pitchDeg) {
-		double y = Math.toRadians(yawDeg);
-		double p = Math.toRadians(pitchDeg);
-		return new Vec3(-Math.sin(y) * Math.cos(p), -Math.sin(p), Math.cos(y) * Math.cos(p));
-	}
-
-	/**
-	 * Distance minimale pour que toute la boite tienne dans l'image.
-	 *
-	 * <p>Une sphere englobante suffirait, mais elle gaspille beaucoup de place pour un sujet plat ou
-	 * allonge, et ignore le fait qu'un ecran large offre un champ horizontal bien plus grand que
-	 * vertical. On projette donc les huit coins de la boite dans le repere de la camera : pour
-	 * chaque coin, la contrainte {@code |lateral| <= profondeur * tan(demi-champ)} donne une distance
-	 * minimale, et on retient la plus grande. La marge elargit le champ utile, ce qui laisse de
-	 * l'air autour du sujet.
-	 */
-	private static double fitDistance(StudioBounds.Result bounds, double yaw, double pitch,
-	                                  double fovDeg, double aspect, double margin) {
-		Vec3 look = lookVector(yaw, pitch);
-		// Repere ecran : droite horizontale, puis haut par produit vectoriel.
-		double yr = Math.toRadians(yaw);
-		Vec3 right = new Vec3(-Math.cos(yr), 0, -Math.sin(yr));
-		Vec3 up = right.cross(look);
-		double m = Math.max(0.5, margin);
-		double tanV = Math.tan(Math.toRadians(fovDeg) / 2.0) / m;
-		double tanH = tanV * Math.max(0.2, aspect);
-
-		var box = bounds.box();
-		Vec3 c = bounds.center();
-		double[] xs = {box.minX - c.x, box.maxX - c.x};
-		double[] ys = {box.minY - c.y, box.maxY - c.y};
-		double[] zs = {box.minZ - c.z, box.maxZ - c.z};
-		double needed = 0;
-		for (double qx : xs) {
-			for (double qy : ys) {
-				for (double qz : zs) {
-					Vec3 q = new Vec3(qx, qy, qz);
-					double depth = q.dot(look);
-					needed = Math.max(needed, Math.abs(q.dot(right)) / tanH - depth);
-					needed = Math.max(needed, Math.abs(q.dot(up)) / tanV - depth);
-				}
-			}
-		}
-		return needed;
-	}
-
-	private static double wrapDegrees(double deg) {
-		double d = deg % 360.0;
-		if (d >= 180.0) d -= 360.0;
-		if (d < -180.0) d += 360.0;
-		return d;
-	}
-
 	// --- prise de vue ----------------------------------------------------------------------------
 
 	private static JsonObject frameTarget(RpcContext ctx) throws Exception {
@@ -277,47 +225,22 @@ public final class StudioHandlers {
 		double margin = ctx.optDouble("margin", 1.15);
 		boolean refine = studio && ctx.optBoolean("refine", true);
 		boolean autoCrop = studio && ctx.optBoolean("autoCrop", true);
+		// Par defaut un resume ; le plan complet et les passes de reglage sur demande (StudioResult).
+		boolean verbose = ctx.optBoolean("verbose", false);
 		int bgRgb = parseHex(background);
 
-		// Etat a restaurer en fin d'operation.
-		FocusState.Snapshot focusBefore = FocusState.INSTANCE.snapshot();
-		Object[] before = ClientMc.call(() -> {
-			LocalPlayer p = ClientMc.player();
-			return new Object[]{p.position(), p.getYRot(), p.getXRot(),
-					mc.gameMode != null ? mc.gameMode.getPlayerMode().getSerializedName() : "unknown"};
-		});
-		Vec3 startPos = (Vec3) before[0];
-		float startYaw = (float) before[1];
-		float startPitch = (float) before[2];
-		String startMode = (String) before[3];
-		int startFov = ClientMc.call(() -> ClientMc.mc().options.fov().get());
-
-		// Le cadrage n'est correct que si le rendu utilise bien le champ de vision du calcul.
+		// Etat a restaurer en fin d'operation : focus, champ de vision, position, mode de jeu. Le
+		// cadrage n'est correct que si le rendu utilise bien le champ de vision du calcul. Le mode
+		// n'est rendu que si le joueur revient a son point de depart : le rendre a la position de la
+		// camera, souvent en l'air, le ferait tomber.
 		int shootFov = (int) Math.round(plan.fov());
-		ClientMc.call(() -> {
-			ClientMc.mc().options.fov().set(shootFov);
-			return null;
-		});
-
-		JsonObject spectatorInfo = new JsonObject();
-		spectatorInfo.addProperty("requested", spectator);
-		spectatorInfo.addProperty("previousMode", startMode);
-		boolean modeChanged = false;
-
-		try {
-			if (spectator && !"spectator".equals(startMode)) {
-				command(cfg.gamemodeCommand + " spectator");
-				MainThread.await(TickWaiter.after(4), 4000);
-				String now = ClientMc.call(() ->
-						mc.gameMode != null ? mc.gameMode.getPlayerMode().getSerializedName() : "unknown");
-				if (!"spectator".equals(now)) {
-					// Deplacer un joueur en survie vers une position en l'air le ferait chuter.
-					throw RpcException.forbidden("Passage en spectateur refuse par le serveur (mode actuel : " + now
-							+ "). Donner la permission au joueur, se mettre en spectateur manuellement, ou passer spectator:false.");
-				}
-				modeChanged = true;
-			}
-			spectatorInfo.addProperty("applied", modeChanged || "spectator".equals(startMode));
+		try (Excursion excursion = Excursion.begin(Excursion.options()
+				.spectator(spectator)
+				.fov(shootFov)
+				.restorePosition(returnToStart)
+				.restoreMode(returnToStart)
+				.restoreFocus(true))) {
+			JsonObject spectatorInfo = excursion.toJson();
 
 			if (studio) {
 				FocusState.INSTANCE.setEntities(Set.of(java.util.UUID.fromString(plan.targetUuid())), Set.of(), Set.of());
@@ -335,7 +258,7 @@ public final class StudioHandlers {
 			// /tp place les pieds du joueur, la camera est a hauteur des yeux : sans cette correction,
 			// le sujet apparait environ 1,6 bloc trop bas dans l'image. Lu apres le passage en
 			// spectateur, la posture (et donc la hauteur des yeux) pouvant changer.
-			double eyeHeight = ClientMc.call(() -> (double) ClientMc.player().getEyeHeight());
+			double eyeHeight = excursion.eyeHeight();
 
 			JsonArray shots = new JsonArray();
 			for (Shot shot : plan.shots()) {
@@ -426,6 +349,9 @@ public final class StudioHandlers {
 				}
 				JsonObject image = Images.encodeRegion(png, crop, maxWidth, 0, format, quality);
 				entry.addProperty("distanceUsed", distance);
+				// La camera du plan n'est plus celle de la prise quand la distance a ete reglee :
+				// c'est celle-ci qu'il faut redonner pour reproduire la vue.
+				entry.add("cameraUsed", cameraJson(shot, distance));
 				for (var e : image.entrySet()) entry.add(e.getKey(), e.getValue());
 				shots.add(entry);
 			}
@@ -435,25 +361,10 @@ public final class StudioHandlers {
 			o.addProperty("eyeHeight", eyeHeight);
 			o.addProperty("studio", studio);
 			o.add("spectator", spectatorInfo);
-			o.addProperty("previousFov", startFov);
+			o.addProperty("previousFov", excursion.startFov());
+			o.addProperty("returnedToStart", returnToStart);
 			o.addProperty("captured", true);
-			return o;
-		} finally {
-			FocusState.INSTANCE.restore(focusBefore);
-			try {
-				ClientMc.call(() -> {
-					ClientMc.mc().options.fov().set(startFov);
-					return null;
-				});
-				if (returnToStart) {
-					// La position de depart est celle des pieds : la camera vise 1,62 bloc plus haut.
-					Commands.moveCamera(startPos.add(0, ClientMc.call(() -> (double) ClientMc.player().getEyeHeight()), 0),
-							startYaw, startPitch);
-				}
-				if (modeChanged && !"unknown".equals(startMode)) command(cfg.gamemodeCommand + " " + startMode);
-			} catch (Exception restoreFailed) {
-				McBridgeMod.LOGGER.warn("[mcbridge] restauration apres studio.frameTarget incomplete", restoreFailed);
-			}
+			return verbose ? o : StudioResult.compact(o);
 		}
 	}
 
@@ -469,12 +380,7 @@ public final class StudioHandlers {
 	/** Place la camera pour une vue a la distance donnee, verifie l'arrivee, et capture. */
 	private static byte[] shoot(BridgeConfig cfg, Minecraft mc, Shot shot, double distance,
 	                            int waitTicks) throws Exception {
-		Vec3 pos = shot.pos();
-		if (Math.abs(distance - shot.distance()) > 1e-6) {
-			// Meme direction de visee, distance corrigee.
-			Vec3 dir = shot.pos().subtract(centerOf(shot)).normalize();
-			pos = centerOf(shot).add(dir.scale(distance));
-		}
+		Vec3 pos = cameraPos(shot, distance);
 		Commands.moveCamera(pos, shot.yaw(), shot.pitch());
 		byte[] png = VisionHandlers.captureRawPng(cfg, mc, true, true, waitTicks);
 		// Un plugin peut rejeter la commande sans que le client le sache : on verifie que le joueur
@@ -491,9 +397,26 @@ public final class StudioHandlers {
 		return png;
 	}
 
+	/** Position de camera d'une vue a la distance donnee : meme direction de visee, distance corrigee. */
+	private static Vec3 cameraPos(Shot shot, double distance) {
+		if (Math.abs(distance - shot.distance()) <= 1e-6) return shot.pos();
+		Vec3 dir = shot.pos().subtract(centerOf(shot)).normalize();
+		return centerOf(shot).add(dir.scale(distance));
+	}
+
+	/** Camera reellement utilisee pour une vue, sous la meme forme que celle du plan. */
+	private static JsonObject cameraJson(Shot shot, double distance) {
+		JsonObject c = new JsonObject();
+		c.add("pos", Json.vec(cameraPos(shot, distance)));
+		c.addProperty("yaw", shot.yaw());
+		c.addProperty("pitch", shot.pitch());
+		c.addProperty("distance", distance);
+		return c;
+	}
+
 	/** Centre vise par une prise de vue, deduit de sa position et de sa distance. */
 	private static Vec3 centerOf(Shot shot) {
-		return shot.pos().add(lookVector(shot.yaw(), shot.pitch()).scale(shot.distance()));
+		return shot.pos().add(Framing.lookVector(shot.yaw(), shot.pitch()).scale(shot.distance()));
 	}
 
 	private static int fullWidth(Minecraft mc) throws RpcException {
@@ -513,8 +436,4 @@ public final class StudioHandlers {
 		}
 	}
 
-	/** Envoie une commande, en respectant le debit maximal ({@link Commands}). */
-	private static void command(String command) throws RpcException {
-		Commands.send(command);
-	}
 }

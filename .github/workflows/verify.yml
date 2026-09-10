@@ -1,0 +1,63 @@
+# Verification automatique de ce qui se teste sans Minecraft.
+#
+# Le rendu, les mixins et les captures demandent un vrai client et restent verifies a la main
+# (voir CLAUDE.md). Ce workflow couvre le reste : compilation, tests unitaires, coherence entre le
+# catalogue MCP et les handlers du mod, et fraicheur des artefacts embarques dans le plugin.
+name: verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Cache Gradle et Loom
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('mod/gradle.properties', 'mod/build.gradle') }}
+
+      - name: Mod, compilation et tests
+        working-directory: mod
+        run: ./gradlew test build --no-daemon
+
+      - name: Serveur MCP, tests et contrat
+        working-directory: mcp-server
+        run: |
+          npm ci
+          npm run verify
+
+      # Le jar et le bundle sont versionnes parce qu'un plugin Claude Code est copie tel quel.
+      # Les oublier ne casse rien a la compilation : le plugin publie expose simplement des tools
+      # qui n'existent plus, ou pas encore.
+      - name: Artefacts du plugin a jour
+        run: node scripts/check-plugin.mjs
+
+      - name: Reference des tools a jour
+        run: |
+          node scripts/gen-tools-doc.mjs > /tmp/TOOLS.md
+          diff -u docs/TOOLS.md /tmp/TOOLS.md || {
+            echo "docs/TOOLS.md est en retard : node scripts/gen-tools-doc.mjs > docs/TOOLS.md"
+            exit 1
+          }

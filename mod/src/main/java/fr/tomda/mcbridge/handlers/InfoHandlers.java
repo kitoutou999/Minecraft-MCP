@@ -24,8 +24,8 @@ public final class InfoHandlers {
 			Minecraft mc = ClientMc.mc();
 			JsonObject o = new JsonObject();
 			o.addProperty("mod", McBridgeMod.MOD_ID);
-			o.addProperty("modVersion", McBridgeMod.MOD_VERSION);
-			o.addProperty("minecraftVersion", McBridgeMod.MC_VERSION);
+			o.addProperty("modVersion", McBridgeMod.modVersion());
+			o.addProperty("minecraftVersion", McBridgeMod.mcVersion());
 			o.addProperty("inWorld", mc.player != null && mc.level != null);
 			if (mc.player != null) o.addProperty("playerName", mc.player.getName().getString());
 			ServerData sd = mc.getCurrentServer();
